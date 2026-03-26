@@ -350,8 +350,7 @@ function parseSynchro(text) {
 }
 
 // ── TWSC (unsignalized) parser ────────────────────────────────────────────────
-// Uses only Minor Lane/Major Mvmt, reverts lane-group logic to earlier method.
-// No approach-level or overall rows; only lane rows that actually exist.
+// Uses only Minor Lane/Major Mvmt. No approach or overall rows; only lane rows.
 function parseTWSC(block, node, intName, period, control, results) {
   const lines = block.split('\n');
 
@@ -391,7 +390,7 @@ function parseTWSC(block, node, intName, period, control, results) {
     }
   }
 
-  // Only emit lane-level rows for headers that actually exist.
+  // Only emit lane-level rows that actually exist.
   for (const h of laneHeaders) {
     if (!h || h === '-') continue;
     const delay = laneDelays[h];
@@ -401,7 +400,7 @@ function parseTWSC(block, node, intName, period, control, results) {
     const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
     const approach = approachMatch ? approachMatch[1].toUpperCase() : h;
 
-    // Revert to old lane-group logic:
+    // Lane group logic reverted to original:
     // strip approach, map Ln1->R, Ln2->'', then detect L/T/R.
     let lgRaw = h.replace(/^(EB|WB|NB|SB)/i, '');
     lgRaw = lgRaw.replace('Ln1', 'R').replace('Ln2', '');
@@ -494,14 +493,13 @@ function parseSignalized(block, node, intName, period, control, results) {
     if (losMatch) overallLOS = losMatch[1];
   }
 
-  // Lane-group rows
+  // Lane-group rows with simple L/T/R mapping
   for (const [key, delay] of Object.entries(laneDelays)) {
     const m = key.match(/^(EB|WB|NB|SB)(.*)/);
     if (!m) continue;
     const approach = m[1];
     let move = m[2] || 'T';
 
-    // Normalize movement to single L/T/R for ordering and clarity where possible
     let laneGroup;
     if (move === 'L') laneGroup = 'L';
     else if (move === 'T' || move === '') laneGroup = 'T';
