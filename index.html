@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Synchro LOS Parser</title>
-  <!-- Use ExcelJS instead of SheetJS for full styling support -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -546,7 +545,7 @@ function roundDelay(delay) {
   return Math.round(delay * 10) / 10;
 }
 
-// ─── Excel builder with ExcelJS (full formatting) ─────────────────────────────
+// ─── Excel builder with ExcelJS (full formatting + merging) ───────────────────
 async function buildCombinedExcel(dataByPeriod) {
   const workbook = new ExcelJS.Workbook();
   const periods = ['AM', 'PM', 'SAT'].filter(p => dataByPeriod[p]);
@@ -669,16 +668,12 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
     return sortLaneGroup(lgA, lgB, ctrlA);
   });
 
-  let lastNode = null;
   let rowNum = 4;
+  const dataRows = []; // Store row data for merging later
 
   sortedKeys.forEach(key => {
     const data = dataMap[key];
-    const showNode = data.node !== lastNode ? data.node : '';
-    const showInt  = data.node !== lastNode ? formatIntName(data.intName) : '';
-    const showCtrl = data.node !== lastNode ? data.control : '';
-    lastNode = data.node;
-
+    
     const exData  = data.scenarios['EX']     || {};
     const nbData  = data.scenarios['NB']     || {};
     const bdData  = data.scenarios['BD']     || {};
@@ -686,9 +681,9 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
 
     const row = ws.getRow(rowNum);
     row.values = [
-      showNode,
-      showCtrl,
-      showInt,
+      data.node,
+      data.control,
+      formatIntName(data.intName),
       data.approach,
       data.laneGroup,
       exData.delay  != null ? exData.delay.toFixed(1)  : '',
@@ -700,6 +695,14 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
       mitData.delay != null ? mitData.delay.toFixed(1) : '',
       mitData.los  || ''
     ];
+
+    // Store for merging
+    dataRows.push({
+      rowNum,
+      node: data.node,
+      intName: formatIntName(data.intName),
+      approach: data.approach
+    });
 
     // Style data rows
     const dataFont = { name: 'Segoe UI', size: 8 };
@@ -715,6 +718,55 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
 
     rowNum++;
   });
+
+  // Apply merges for intersection names (column C) and approaches (column D)
+  applyDataMerges(ws, dataRows);
+}
+
+function applyDataMerges(ws, dataRows) {
+  // Merge intersection names (column C = 3)
+  let intStart = null;
+  let lastInt = null;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const curr = dataRows[i];
+    
+    if (curr.intName !== lastInt) {
+      // Finish previous merge
+      if (intStart !== null && i - 1 > intStart) {
+        ws.mergeCells(dataRows[intStart].rowNum, 3, dataRows[i - 1].rowNum, 3);
+      }
+      // Start new merge
+      intStart = i;
+      lastInt = curr.intName;
+    }
+  }
+  // Finish last merge
+  if (intStart !== null && dataRows.length - 1 > intStart) {
+    ws.mergeCells(dataRows[intStart].rowNum, 3, dataRows[dataRows.length - 1].rowNum, 3);
+  }
+
+  // Merge approaches (column D = 4)
+  let appStart = null;
+  let lastApp = null;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const curr = dataRows[i];
+    
+    if (curr.approach !== lastApp) {
+      // Finish previous merge
+      if (appStart !== null && i - 1 > appStart) {
+        ws.mergeCells(dataRows[appStart].rowNum, 4, dataRows[i - 1].rowNum, 4);
+      }
+      // Start new merge
+      appStart = i;
+      lastApp = curr.approach;
+    }
+  }
+  // Finish last merge
+  if (appStart !== null && dataRows.length - 1 > appStart) {
+    ws.mergeCells(dataRows[appStart].rowNum, 4, dataRows[dataRows.length - 1].rowNum, 4);
+  }
 }
 
 function formatIntName(name) {
@@ -781,6 +833,8 @@ function renderPreviewCombined(scenarioData, period) {
 
   const preview = sortedKeys.slice(0, 20);
   let lastNode = null;
+  let lastInt = null;
+  let lastApp = null;
 
   preview.forEach(key => {
     const data = dataMap[key];
@@ -794,7 +848,11 @@ function renderPreviewCombined(scenarioData, period) {
     const showNode = data.node !== lastNode ? data.node : '';
     const showInt  = data.node !== lastNode ? formatIntName(data.intName) : '';
     const showCtrl = data.node !== lastNode ? data.control : '';
+    const showApp  = data.approach !== lastApp ? data.approach : '';
+    
     lastNode = data.node;
+    lastInt = data.intName;
+    lastApp = data.approach;
 
     const makeBadge = los => los ? `<span class="los-badge los-${los}">${los}</span>` : '';
     const makeDelay = d => d != null ? d.toFixed(1) : '';
@@ -803,7 +861,7 @@ function renderPreviewCombined(scenarioData, period) {
       <td>${showNode}</td>
       <td>${showCtrl}</td>
       <td style="max-width:200px;white-space:normal">${showInt}</td>
-      <td>${data.approach}</td>
+      <td>${showApp}</td>
       <td>${data.laneGroup}</td>
       <td>${makeDelay(exData.delay)}</td>
       <td>${makeBadge(exData.los)}</td>
