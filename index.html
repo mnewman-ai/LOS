@@ -350,58 +350,60 @@ function parseSynchro(text) {
 }
 
 // ── TWSC (unsignalized) parser ────────────────────────────────────────────────
-// Uses only Minor Lane/Major Mvmt. No approach or overall rows; only lane rows.
+// Uses only Minor Lane/Major Mvmt; aligns headers and delays by column.
 function parseTWSC(block, node, intName, period, control, results) {
   const lines = block.split('\n');
 
+  let minorHeaderCells = null;  // full cells array for Minor Lane/Major Mvmt
   let laneDelays = {};
   let laneLOS    = {};
-  let laneHeaders = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (!line.trim()) continue;
     const cells = line.split('\t');
-    const rowLabel = cells[0].trim();
+    const rowLabel = (cells[0] || '').trim();
 
-    // Minor Lane/Major Mvmt header row defines lane headers
     if (/Minor Lane\/Major Mvmt/i.test(rowLabel)) {
-      laneHeaders = cells.slice(1).map(c => c.trim()).filter(Boolean);
+      // Store the full cells array so indices match the delay/LOS rows
+      minorHeaderCells = cells;
     }
 
-    // Lane delays
-    if (/HCM Ctrl Dly \(s\/v\)/i.test(rowLabel)) {
-      const vals = cells.slice(1).map(c => c.trim());
-      laneHeaders.forEach((h, idx) => {
-        if (h && vals[idx] && vals[idx] !== '-' && vals[idx] !== '') {
-          const v = parseFloat(vals[idx]);
-          if (!isNaN(v)) laneDelays[h] = v;
-        }
-      });
+    // Delay row
+    if (/HCM Ctrl Dly \(s\/v\)/i.test(rowLabel) && minorHeaderCells) {
+      // For each column c >= 1: header from minorHeaderCells[c], delay from cells[c]
+      const len = Math.max(minorHeaderCells.length, cells.length);
+      for (let c = 1; c < len; c++) {
+        const h = (minorHeaderCells[c] || '').trim();
+        const vStr = (cells[c] || '').trim();
+        if (!h || !vStr || vStr === '-' ) continue;
+        const v = parseFloat(vStr);
+        if (isNaN(v)) continue;
+        laneDelays[h] = v;
+      }
     }
 
-    // Lane LOS
-    if (/HCM Lane LOS/i.test(rowLabel)) {
-      const vals = cells.slice(1).map(c => c.trim());
-      laneHeaders.forEach((h, idx) => {
-        if (h && vals[idx] && vals[idx] !== '-' && vals[idx] !== '') {
-          laneLOS[h] = vals[idx];
-        }
-      });
+    // LOS row
+    if (/HCM Lane LOS/i.test(rowLabel) && minorHeaderCells) {
+      const len = Math.max(minorHeaderCells.length, cells.length);
+      for (let c = 1; c < len; c++) {
+        const h = (minorHeaderCells[c] || '').trim();
+        const losStr = (cells[c] || '').trim();
+        if (!h || !losStr || losStr === '-' ) continue;
+        laneLOS[h] = losStr;
+      }
     }
   }
 
-  // Only emit lane-level rows that actually exist.
-  for (const h of laneHeaders) {
-    if (!h || h === '-') continue;
-    const delay = laneDelays[h];
+  // Only emit lane-level rows that actually exist (unsignalized: no approach/overall rows)
+  for (const [h, delay] of Object.entries(laneDelays)) {
     if (delay == null || isNaN(delay)) continue;
 
-    // Derive approach from header prefix (e.g. "NB" from "NBLn1" or "NBL")
+    // Approach from prefix (EB/WB/NB/SB)
     const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
     const approach = approachMatch ? approachMatch[1].toUpperCase() : h;
 
-    // Lane group logic reverted to original:
-    // strip approach, map Ln1->R, Ln2->'', then detect L/T/R.
+    // Lane group logic: strip approach, Ln1->R, Ln2->'', then detect L/T/R
     let lgRaw = h.replace(/^(EB|WB|NB|SB)/i, '');
     lgRaw = lgRaw.replace('Ln1', 'R').replace('Ln2', '');
     let laneGroup = lgRaw || h;
@@ -440,13 +442,14 @@ function parseSignalized(block, node, intName, period, control, results) {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (!line.trim()) continue;
     const cells = line.split('\t');
-    const rowLabel = cells[0].trim();
+    const rowLabel = (cells[0] || '').trim();
 
     if (/^Lane Group\s*$/i.test(rowLabel)) {
       lgCols = [];
       for (let c = 2; c < cells.length; c++) {
-        const v = cells[c].trim();
+        const v = (cells[c] || '').trim();
         if (!v) continue;
         const m = v.match(/^(EB|WB|NB|SB)(L|T|R|LT|TR|LR|LTR)?$/i);
         if (m) {
@@ -461,7 +464,7 @@ function parseSignalized(block, node, intName, period, control, results) {
 
     if (/^(Control Delay|Total Delay)\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
-        const v = parseFloat(cells[lc.col]);
+        const v = parseFloat((cells[lc.col] || '').trim());
         if (!isNaN(v)) laneDelays[lc.approach + lc.move] = v;
       });
     }
@@ -475,7 +478,7 @@ function parseSignalized(block, node, intName, period, control, results) {
 
     if (/^Approach Delay\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
-        const v = parseFloat(cells[lc.col]);
+        const v = parseFloat((cells[lc.col] || '').trim());
         if (!isNaN(v)) approachDelays[lc.approach] = v;
       });
     }
