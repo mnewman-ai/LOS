@@ -158,18 +158,18 @@
 
 <div class="card">
   <h1>Synchro LOS Parser</h1>
-  <p class="subtitle">Drop in a Synchro report (.txt) and get an Excel LOS summary instantly.</p>
+  <p class="subtitle">Drop in Synchro reports (.txt) and get an Excel LOS summary with multiple tabs.</p>
 
-  <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+  <div class="drop-zone" id="dropZone">
     <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round"
         d="M12 16v-8m0 0-3 3m3-3 3 3M4.5 19.5h15A2.25 2.25 0 0 0 21.75 17V9.75A2.25 2.25 0 0 0 19.5 7.5h-3.75L14.25 5.25H9.75L8.25 7.5H4.5A2.25 2.25 0 0 0 2.25 9.75V17A2.25 2.25 0 0 0 4.5 19.5Z"/>
     </svg>
-    <p>Click or drag &amp; drop your Synchro report here</p>
-    <span>Accepts .txt files exported from Synchro</span>
+    <p>Click or drag &amp; drop your Synchro reports here</p>
+    <span>Accepts multiple .txt files (e.g., EX AM.txt, NB PM.txt, BD SAT.txt)</span>
     <div class="file-name" id="fileName"></div>
   </div>
-  <input type="file" id="fileInput" accept=".txt" />
+  <input type="file" id="fileInput" accept=".txt" multiple />
 
   <button class="btn" id="parseBtn" disabled>Generate Excel File</button>
 
@@ -185,10 +185,11 @@
   <div class="how-to">
     <h3>How to use</h3>
     <ol>
-      <li>Export your Synchro report as a <strong>.txt</strong> file (File → Reports → Text Report).</li>
-      <li>Drop the file above or click to browse.</li>
+      <li>Export your Synchro reports as <strong>.txt</strong> files (File → Reports → Text Report).</li>
+      <li>Name files with scenario and period (e.g., <strong>EX AM.txt</strong>, <strong>NB PM.txt</strong>, <strong>BD MIT SAT.txt</strong>).</li>
+      <li>Drop all files above or click to browse (you can select multiple files).</li>
       <li>Click <strong>Generate Excel File</strong>.</li>
-      <li>The Excel sheet downloads automatically with AM, PM, and SAT tabs — open it in Excel.</li>
+      <li>The Excel sheet downloads with tabs named after your files.</li>
     </ol>
   </div>
 </div>
@@ -203,42 +204,125 @@ const fileName  = document.getElementById('fileName');
 const parseBtn  = document.getElementById('parseBtn');
 const statusEl  = document.getElementById('status');
 
-let fileContent = '';
+let loadedFiles = []; // Array of {name: string, content: string}
 
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', e => { 
+  e.preventDefault(); 
+  dropZone.classList.add('dragover'); 
+});
+
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('dragover');
-  const f = e.dataTransfer.files[0];
-  if (f) loadFile(f);
+  const files = Array.from(e.dataTransfer.files);
+  if (files.length) loadFiles(files);
 });
-fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
 
-function loadFile(f) {
-  fileName.textContent = f.name;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    fileContent = ev.target.result;
-    parseBtn.disabled = false;
-    showStatus('File loaded: ' + f.name, 'info');
-  };
-  reader.readAsText(f, 'utf-8');
+fileInput.addEventListener('change', () => { 
+  if (fileInput.files.length) loadFiles(Array.from(fileInput.files)); 
+});
+
+function loadFiles(files) {
+  loadedFiles = [];
+  let loaded = 0;
+  
+  files.forEach(f => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      loadedFiles.push({
+        name: f.name,
+        content: ev.target.result
+      });
+      loaded++;
+      
+      if (loaded === files.length) {
+        fileName.textContent = files.map(f => f.name).join(', ');
+        parseBtn.disabled = false;
+        showStatus(`${files.length} file(s) loaded`, 'info');
+      }
+    };
+    reader.readAsText(f, 'utf-8');
+  });
 }
 
 parseBtn.addEventListener('click', () => {
-  if (!fileContent) return;
+  if (!loadedFiles.length) return;
   try {
-    const rows = parseSynchro(fileContent);
-    if (!rows.length) { showStatus('No intersections found. Make sure this is a Synchro text report.', 'error'); return; }
-    buildExcel(rows);
-    renderPreview(rows);
-    showStatus(`✓ Done! Found ${rows.length} data rows across ${countIntersections(rows)} intersections. Excel file downloaded.`, 'success');
+    const allSheets = [];
+    
+    for (const file of loadedFiles) {
+      const rows = parseSynchro(file.content);
+      if (rows.length) {
+        const tabName = deriveTabName(file.name);
+        allSheets.push({ tabName, rows });
+      }
+    }
+    
+    if (!allSheets.length) { 
+      showStatus('No intersections found in any file. Make sure these are Synchro text reports.', 'error'); 
+      return; 
+    }
+    
+    buildExcel(allSheets);
+    renderPreview(allSheets[0].rows);
+    
+    const totalRows = allSheets.reduce((sum, s) => sum + s.rows.length, 0);
+    const totalIntersections = allSheets.reduce((sum, s) => sum + countIntersections(s.rows), 0);
+    showStatus(`✓ Done! Found ${totalRows} data rows across ${totalIntersections} intersections in ${allSheets.length} tab(s). Excel file downloaded.`, 'success');
   } catch(err) {
     showStatus('Error parsing file: ' + err.message, 'error');
     console.error(err);
   }
 });
+
+function deriveTabName(filename) {
+  // Remove .txt extension
+  let name = filename.replace(/\.txt$/i, '').trim();
+  
+  // Extract scenario (EX, NB, BD, BD MIT) and period (AM, PM, SAT)
+  let scenario = '';
+  let period = '';
+  
+  // Check for BD MIT first (before BD)
+  if (/BD\s*MIT/i.test(name)) {
+    scenario = 'BD MIT';
+    name = name.replace(/BD\s*MIT/i, '').trim();
+  } else if (/BD/i.test(name)) {
+    scenario = 'BD';
+    name = name.replace(/BD/i, '').trim();
+  } else if (/NB/i.test(name)) {
+    scenario = 'NB';
+    name = name.replace(/NB/i, '').trim();
+  } else if (/EX/i.test(name)) {
+    scenario = 'EX';
+    name = name.replace(/EX/i, '').trim();
+  }
+  
+  // Check for period
+  if (/SAT/i.test(name)) {
+    period = 'SAT';
+  } else if (/PM/i.test(name)) {
+    period = 'PM';
+  } else if (/AM/i.test(name)) {
+    period = 'AM';
+  }
+  
+  // Construct tab name
+  if (scenario && period) {
+    return `${scenario} ${period}`;
+  } else if (scenario) {
+    return scenario;
+  } else if (period) {
+    return period;
+  } else {
+    // Fallback: use first 31 chars of filename (Excel tab name limit)
+    return filename.replace(/\.txt$/i, '').substring(0, 31);
+  }
+}
 
 function showStatus(msg, type) {
   statusEl.textContent = msg;
@@ -251,18 +335,13 @@ function countIntersections(rows) {
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 function parseSynchro(text) {
-  // Normalize line endings
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   const results = [];
-
-  // Split into intersection blocks (separated by form feed \f or page breaks)
   const rawBlocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\f');
 
   for (const block of rawBlocks) {
     if (!block.trim()) continue;
     const blockLines = block.split('\n');
 
-    // First non-empty line: "N: Intersection Name\tPeak Period"
     let headerLine = '';
     for (const l of blockLines) {
       if (/^\d+:/.test(l.trim())) { headerLine = l.trim(); break; }
@@ -276,7 +355,6 @@ function parseSynchro(text) {
     const intName = headerMatch[2].trim();
     const period  = headerMatch[3].trim();
 
-    // Detect control type
     const blockText = block;
     const isSignalized = /^Timings\t/m.test(blockText) ||
                          /Intersection Signal Delay/i.test(blockText);
@@ -296,11 +374,8 @@ function parseSynchro(text) {
 function parseTWSC(block, node, intName, period, control, results) {
   const lines = block.split('\n');
 
-  // Collect approach-level delay & LOS from "HCM Ctrl Dly" and "HCM LOS" rows
   let approachDelays = {};
   let approachLOS    = {};
-
-  // Lane-level delay & LOS from "HCM Ctrl Dly (s/v)" and "HCM Lane LOS" rows
   let laneDelays = {};
   let laneLOS    = {};
   let laneHeaders = [];
@@ -310,9 +385,7 @@ function parseTWSC(block, node, intName, period, control, results) {
     const cells = line.split('\t');
     const rowLabel = cells[0].trim();
 
-    // Approach row: "Approach  \t\tEB\t\t\tWB\t\t\tNB\t\t\tSB\t\t"
     if (/^Approach\s*$/.test(rowLabel)) {
-      // Next line is HCM Ctrl Dly, s/v
       const dirs = extractApproachDirs(cells);
       const delayLine = lines[i + 1] || '';
       const losLine   = lines[i + 2] || '';
@@ -332,7 +405,6 @@ function parseTWSC(block, node, intName, period, control, results) {
       }
     }
 
-    // Lane-level section: "Minor Lane/Major Mvmt"
     if (/Minor Lane\/Major Mvmt/i.test(rowLabel)) {
       laneHeaders = cells.slice(1).map(c => c.trim()).filter(Boolean);
     }
@@ -354,10 +426,7 @@ function parseTWSC(block, node, intName, period, control, results) {
     }
   }
 
-  // Build rows: one per lane group header
-  // Lane headers look like "NBLn1", "WBL", "EBT", "SBLn1" etc.
   if (laneHeaders.length === 0) {
-    // fallback: approach-level only
     for (const [dir, delay] of Object.entries(approachDelays)) {
       results.push({
         node, control, intName, period,
@@ -371,12 +440,10 @@ function parseTWSC(block, node, intName, period, control, results) {
 
   for (const h of laneHeaders) {
     if (!h || h === '-') continue;
-    // Derive approach from header prefix (e.g. "NB" from "NBLn1" or "NBL")
     const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
     const approach = approachMatch ? approachMatch[1].toUpperCase() : h;
     const laneGroup = h.replace(/^(EB|WB|NB|SB)/i, '').replace('Ln1','R').replace('Ln2','') || h;
 
-    // Use lane delay if available, else approach delay
     const delay = laneDelays[h] != null ? laneDelays[h] : (approachDelays[approach] || null);
     const los   = laneLOS[h]    || approachLOS[approach] || computeLOS(delay, 'U');
 
@@ -385,7 +452,6 @@ function parseTWSC(block, node, intName, period, control, results) {
 }
 
 function extractApproachDirs(cells) {
-  // cells[2] onward, every 3rd cell is a direction (EB, WB, NB, SB)
   const dirs = [];
   for (let i = 2; i < cells.length; i++) {
     const v = cells[i].trim();
@@ -398,8 +464,6 @@ function extractApproachDirs(cells) {
 function parseSignalized(block, node, intName, period, control, results) {
   const lines = block.split('\n');
 
-  // We need: lane group row, LOS row, Approach Delay row, Approach LOS row, Overall
-  let laneGroups = [];
   let laneDelays = {};
   let laneLOS    = {};
   let approachDelays = {};
@@ -407,9 +471,7 @@ function parseSignalized(block, node, intName, period, control, results) {
   let overallDelay   = null;
   let overallLOS     = null;
 
-  // Parse "Lane Group" header row to know which columns map to which direction
-  // Format: Lane Group  \t\t EBL \t EBT \t EBR \t WBL ...
-  let lgCols = []; // [{direction, movement, colIdx}]
+  let lgCols = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -455,31 +517,24 @@ function parseSignalized(block, node, intName, period, control, results) {
       });
     }
 
-    // Overall from "Intersection Signal Delay (s/veh): X   Intersection LOS: Y"
     const sigMatch = line.match(/Intersection Signal Delay\s*\(s\/veh\)[:\s]+([\d.]+)/i);
     if (sigMatch) overallDelay = parseFloat(sigMatch[1]);
     const losMatch = line.match(/Intersection LOS[:\s]+([A-F])/i);
     if (losMatch) overallLOS = losMatch[1];
   }
 
-  // Emit lane-group rows
-  const addedApproaches = new Set();
   for (const [key, delay] of Object.entries(laneDelays)) {
     const m = key.match(/^(EB|WB|NB|SB)(.*)/);
     if (!m) continue;
     const approach = m[1];
     const move = m[2];
     results.push({ node, control, intName, period, approach, laneGroup: move || 'T', delay, los: laneLOS[key] || computeLOS(delay, 'S') });
-    // Queue approach row after all moves for this approach
-    addedApproaches.add(approach);
   }
 
-  // Approach rows
   for (const [approach, delay] of Object.entries(approachDelays)) {
     results.push({ node, control, intName, period, approach, laneGroup: 'Approach', delay, los: approachLOS[approach] || computeLOS(delay, 'S') });
   }
 
-  // Overall row
   if (overallDelay !== null) {
     results.push({ node, control, intName, period, approach: 'Overall', laneGroup: '', delay: overallDelay, los: overallLOS || computeLOS(overallDelay, 'S') });
   }
@@ -518,8 +573,6 @@ function sortApproach(a, b) {
 }
 
 function sortLaneGroup(a, b, control) {
-  // For signalized: L, T, R, Approach
-  // For unsignalized: L, T, R
   const order = control === 'S' ? ['L', 'T', 'R', 'Approach'] : ['L', 'T', 'R'];
   const idxA = order.indexOf(a);
   const idxB = order.indexOf(b);
@@ -531,14 +584,9 @@ function sortLaneGroup(a, b, control) {
 
 function sortRows(rows) {
   return rows.sort((a, b) => {
-    // First by node
     if (a.node !== b.node) return a.node - b.node;
-    
-    // Then by approach (EB, WB, NB, SB, Overall)
     const approachCmp = sortApproach(a.approach, b.approach);
     if (approachCmp !== 0) return approachCmp;
-    
-    // Then by lane group (L, T, R, Approach for signalized; L, T, R for unsignalized)
     return sortLaneGroup(a.laneGroup, b.laneGroup, a.control);
   });
 }
@@ -549,46 +597,22 @@ function roundDelay(delay) {
 }
 
 // ─── Excel builder ────────────────────────────────────────────────────────────
-function buildExcel(rows) {
+function buildExcel(allSheets) {
   const wb = XLSX.utils.book_new();
   
-  // Sort rows
-  const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
-  
-  // Separate by period
-  const amRows = sortedRows.filter(r => /AM/i.test(r.period));
-  const pmRows = sortedRows.filter(r => /PM/i.test(r.period));
-  const satRows = sortedRows.filter(r => /SAT/i.test(r.period));
-  
-  // Create sheets
-  if (amRows.length > 0) {
-    const wsData = buildSheetData(amRows);
+  for (const sheet of allSheets) {
+    const sortedRows = sortRows(sheet.rows.map(r => ({...r, delay: roundDelay(r.delay)})));
+    const wsData = buildSheetData(sortedRows);
     const ws = XLSX.utils.aoa_to_sheet(wsData);
+    
     ws['!cols'] = [
       {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
       {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
     ];
-    XLSX.utils.book_append_sheet(wb, ws, 'AM');
-  }
-  
-  if (pmRows.length > 0) {
-    const wsData = buildSheetData(pmRows);
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [
-      {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
-      {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'PM');
-  }
-  
-  if (satRows.length > 0) {
-    const wsData = buildSheetData(satRows);
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [
-      {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
-      {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'SAT');
+    
+    // Excel tab names have a 31 character limit
+    const tabName = sheet.tabName.substring(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, tabName);
   }
   
   XLSX.writeFile(wb, 'LOS_Summary.xlsx');
@@ -607,23 +631,19 @@ function buildSheetData(rows) {
     const showCtrl = r.node !== lastNode ? r.control : '';
     lastNode = r.node;
 
-    // Format delay to one decimal place
     const delayStr = r.delay != null ? r.delay.toFixed(1) : '';
 
     out.push([
       showNode, showCtrl, showInt,
       r.approach, r.laneGroup,
       delayStr, r.los,
-      '', '', '', '', '', ''  // placeholder columns for other scenarios
+      '', '', '', '', '', ''
     ]);
   }
   return out;
 }
 
 function formatIntName(name) {
-  // Swap order: "A & B" → "B at A" style used in the template
-  // "Riverhead Plaza West Access/Riverhead Commons West Access & Old Country Road"
-  // → "Old Country Road at Riverhead Plaza West Access/Riverhead Commons West Access"
   const ampIdx = name.lastIndexOf(' & ');
   if (ampIdx === -1) return name;
   const left  = name.substring(0, ampIdx).trim();
@@ -644,7 +664,6 @@ function renderPreview(rows) {
 
   const tbody = document.createElement('tbody');
   
-  // Sort and round delays for preview
   const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
   const preview = sortedRows.slice(0, 20);
   
