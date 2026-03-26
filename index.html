@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Synchro LOS Parser</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Use ExcelJS instead of SheetJS for full styling support -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -160,7 +161,7 @@
 
 <div class="card">
   <h1>Synchro LOS Parser</h1>
-  <p class="subtitle">Drop in multiple Synchro reports and get a combined Excel LOS summary by peak hour.</p>
+  <p class="subtitle">Drop in multiple Synchro reports and get a formatted Excel LOS summary by peak hour.</p>
 
   <div class="drop-zone" id="dropZone">
     <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
@@ -191,7 +192,7 @@
       <li>Name files like <strong>22700.00 EX AM.txt</strong>, <strong>22700.00 NB PM.txt</strong>, <strong>22700.00 BD SAT.txt</strong>, etc.</li>
       <li>Drop all files at once (or select multiple files).</li>
       <li>Click <strong>Generate Excel File</strong>.</li>
-      <li>Excel will have tabs for <strong>AM</strong>, <strong>PM</strong>, and <strong>SAT</strong> with Existing / No‑Build / Build / Build MIT columns.</li>
+      <li>Excel will have tabs for <strong>AM</strong>, <strong>PM</strong>, and <strong>SAT</strong> with full formatting.</li>
     </ol>
   </div>
 </div>
@@ -240,10 +241,10 @@ function loadFiles(files) {
   });
 }
 
-parseBtn.addEventListener('click', () => {
+parseBtn.addEventListener('click', async () => {
   if (!loadedFiles.length) return;
   try {
-    const dataByPeriod = {}; // { 'AM': { 'EX': [rows], 'NB': [rows], ... }, ... }
+    const dataByPeriod = {};
     
     for (const file of loadedFiles) {
       const rows = parseSynchro(file.content);
@@ -258,7 +259,7 @@ parseBtn.addEventListener('click', () => {
       return;
     }
 
-    buildCombinedExcel(dataByPeriod);
+    await buildCombinedExcel(dataByPeriod);
     
     const firstPeriod = Object.keys(dataByPeriod).sort()[0];
     renderPreviewCombined(dataByPeriod[firstPeriod], firstPeriod);
@@ -281,8 +282,8 @@ function showStatus(msg, type) {
 function parseFilename(filename) {
   let base = filename.replace(/\.txt$/i, '').trim();
   
-  let scenario = 'EX'; // default
-  let period = 'AM';   // default
+  let scenario = 'EX';
+  let period = 'AM';
   
   if (/BD\s*MIT/i.test(base)) {
     scenario = 'BD MIT';
@@ -305,7 +306,7 @@ function parseFilename(filename) {
   return { scenario, period };
 }
 
-// ─── Parser ───────────────────────────────────────────────────────────────────
+// ─── Parser (same as before) ──────────────────────────────────────────────────
 function parseSynchro(text) {
   const results = [];
   const rawBlocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\f');
@@ -341,7 +342,6 @@ function parseSynchro(text) {
   return results;
 }
 
-// ── TWSC (unsignalized) parser ────────────────────────────────────────────────
 function parseTWSC(block, node, intName, period, control, results) {
   const lines = block.split('\n');
   let minorHeaderCells = null;
@@ -401,7 +401,6 @@ function parseTWSC(block, node, intName, period, control, results) {
   }
 }
 
-// ── Signalized parser ─────────────────────────────────────────────────────────
 function parseSignalized(block, node, intName, period, control, results) {
   const lines = block.split('\n');
   let laneDelays = {};
@@ -547,57 +546,95 @@ function roundDelay(delay) {
   return Math.round(delay * 10) / 10;
 }
 
-// ─── Combined Excel builder with formatting ───────────────────────────────────
-function buildCombinedExcel(dataByPeriod) {
-  const wb = XLSX.utils.book_new();
+// ─── Excel builder with ExcelJS (full formatting) ─────────────────────────────
+async function buildCombinedExcel(dataByPeriod) {
+  const workbook = new ExcelJS.Workbook();
   const periods = ['AM', 'PM', 'SAT'].filter(p => dataByPeriod[p]);
 
-  periods.forEach(period => {
+  for (const period of periods) {
     const scenarioData = dataByPeriod[period];
-    const wsData = buildCombinedSheetData(scenarioData, period);
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const worksheet = workbook.addWorksheet(period);
+    
+    buildFormattedSheet(worksheet, scenarioData, period);
+  }
 
-    // Column widths
-    ws['!cols'] = [
-      {wch:6},  // Node
-      {wch:8},  // Control
-      {wch:55}, // Intersection
-      {wch:10}, // Approach
-      {wch:12}, // Lane Group
-      {wch:8}, {wch:6}, // Existing Delay/LOS
-      {wch:8}, {wch:6}, // No-Build
-      {wch:8}, {wch:6}, // Build
-      {wch:8}, {wch:6}  // Build MIT
-    ];
-
-    applyTemplateMergesAndStyles(ws, period, wsData.length);
-
-    XLSX.utils.book_append_sheet(wb, ws, period);
-  });
-
-  XLSX.writeFile(wb, 'LOS_Summary.xlsx');
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'LOS_Summary.xlsx';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-function buildCombinedSheetData(scenarioData, periodLabel) {
-  // Row 0: period title (e.g., "AM") in A1; other cells left blank
-  const titleRow = [periodLabel];
-  while (titleRow.length < 13) titleRow.push('');
+function buildFormattedSheet(ws, scenarioData, periodLabel) {
+  // Column widths
+  ws.columns = [
+    { width: 6 },  // Node
+    { width: 8 },  // Control
+    { width: 55 }, // Intersection
+    { width: 10 }, // Approach
+    { width: 12 }, // Lane Group
+    { width: 8 }, { width: 6 }, // Existing
+    { width: 8 }, { width: 6 }, // No-Build
+    { width: 8 }, { width: 6 }, // Build
+    { width: 8 }, { width: 6 }  // Build MIT
+  ];
 
-  // Row 1 + 2: headers matching template style
-  const header1 = [
+  // Row 1: Title
+  ws.getCell('A1').value = periodLabel;
+  ws.mergeCells('A1:M1');
+  ws.getCell('A1').font = { name: 'Segoe UI', size: 8, bold: true };
+  ws.getCell('A1').alignment = { horizontal: 'left', vertical: 'middle' };
+
+  // Row 2: Header row 1
+  const header1 = ws.getRow(2);
+  header1.values = [
     'Synchro Node #', 'CONTROL', 'Intersection', 'Approach', 'Lane Group',
     'Existing', '', 'No-Build', '', 'Build', '', 'Build with Mitigation', ''
   ];
-  const header2 = [
+  
+  // Row 3: Header row 2
+  const header2 = ws.getRow(3);
+  header2.values = [
     '', '', '', '', '',
-    'Delay', 'LOS',
-    'Delay', 'LOS',
-    'Delay', 'LOS',
-    'Delay', 'LOS'
+    'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS'
   ];
 
-  const out = [titleRow, header1, header2];
+  // Merge header cells
+  ws.mergeCells('A2:A3'); // Node
+  ws.mergeCells('B2:B3'); // Control
+  ws.mergeCells('C2:C3'); // Intersection
+  ws.mergeCells('D2:D3'); // Approach
+  ws.mergeCells('E2:E3'); // Lane Group
+  ws.mergeCells('F2:G2'); // Existing
+  ws.mergeCells('H2:I2'); // No-Build
+  ws.mergeCells('J2:K2'); // Build
+  ws.mergeCells('L2:M2'); // Build MIT
 
+  // Style headers
+  const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
+  const headerFont = { name: 'Segoe UI', size: 8, bold: true };
+  const headerAlignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  const thinBorder = {
+    top: { style: 'thin' },
+    left: { style: 'thin' },
+    bottom: { style: 'thin' },
+    right: { style: 'thin' }
+  };
+
+  for (let row = 2; row <= 3; row++) {
+    for (let col = 1; col <= 13; col++) {
+      const cell = ws.getCell(row, col);
+      cell.fill = headerFill;
+      cell.font = headerFont;
+      cell.alignment = headerAlignment;
+      cell.border = thinBorder;
+    }
+  }
+
+  // Build data
   const allKeys = new Set();
   const dataMap = {};
 
@@ -633,6 +670,7 @@ function buildCombinedSheetData(scenarioData, periodLabel) {
   });
 
   let lastNode = null;
+  let rowNum = 4;
 
   sortedKeys.forEach(key => {
     const data = dataMap[key];
@@ -646,7 +684,8 @@ function buildCombinedSheetData(scenarioData, periodLabel) {
     const bdData  = data.scenarios['BD']     || {};
     const mitData = data.scenarios['BD MIT'] || {};
 
-    out.push([
+    const row = ws.getRow(rowNum);
+    row.values = [
       showNode,
       showCtrl,
       showInt,
@@ -660,82 +699,24 @@ function buildCombinedSheetData(scenarioData, periodLabel) {
       bdData.los   || '',
       mitData.delay != null ? mitData.delay.toFixed(1) : '',
       mitData.los  || ''
-    ]);
+    ];
+
+    // Style data rows
+    const dataFont = { name: 'Segoe UI', size: 8 };
+    const centerAlign = { horizontal: 'center', vertical: 'middle' };
+    const leftAlign = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+    for (let col = 1; col <= 13; col++) {
+      const cell = row.getCell(col);
+      cell.font = dataFont;
+      cell.border = thinBorder;
+      cell.alignment = col === 3 ? leftAlign : centerAlign;
+    }
+
+    rowNum++;
   });
-
-  return out;
 }
 
-// ─── Apply merges + styles to match template ─────────────────────────────────
-function applyTemplateMergesAndStyles(ws, periodLabel, totalRows) {
-  if (!ws['!merges']) ws['!merges'] = [];
-
-  // Title row: merge A1 through M1
-  ws['!merges'].push({ s: { r:0, c:0 }, e: { r:0, c:12 } });
-
-  // Header merges:
-  // Vertically merge Node/Control/Intersection/Approach/LaneGroup over rows 2 & 3
-  for (let c = 0; c <= 4; c++) {
-    ws['!merges'].push({ s: { r:1, c }, e: { r:2, c } });
-  }
-  // Scenario labels: Existing, No-Build, Build, Build MIT in row 2 across Delay+LOS columns
-  ws['!merges'].push({ s:{r:1,c:5}, e:{r:1,c:6} });  // Existing
-  ws['!merges'].push({ s:{r:1,c:7}, e:{r:1,c:8} });  // No-Build
-  ws['!merges'].push({ s:{r:1,c:9}, e:{r:1,c:10} }); // Build
-  ws['!merges'].push({ s:{r:1,c:11}, e:{r:1,c:12} }); // Build MIT
-
-  // Title cell value
-  ws['A1'].v = periodLabel;
-
-  // Styles
-  const headerFill = { patternType: "solid", fgColor: { rgb: "FFD9D9D9" } };
-  const titleFill  = { patternType: "solid", fgColor: { rgb: "FFFFFFFF" } };
-  const borderAll  = {
-    top:    { style: "thin", color: { rgb: "FF000000" } },
-    bottom: { style: "thin", color: { rgb: "FF000000" } },
-    left:   { style: "thin", color: { rgb: "FF000000" } },
-    right:  { style: "thin", color: { rgb: "FF000000" } }
-  };
-
-  // Title style
-  if (!ws['A1'].s) ws['A1'].s = {};
-  ws['A1'].s.font = { name: "Segoe UI", sz: 8, bold: true };
-  ws['A1'].s.alignment = { horizontal: "left", vertical: "center" };
-  ws['A1'].s.fill = titleFill;
-
-  // Header rows (row 2 & 3 in Excel: indices 1 and 2)
-  for (let r = 1; r <= 2; r++) {
-    for (let c = 0; c <= 12; c++) {
-      const addr = XLSX.utils.encode_cell({ r, c });
-      const cell = ws[addr] || (ws[addr] = { t:'s', v:'' });
-      if (!cell.s) cell.s = {};
-      cell.s.font = { name: "Segoe UI", sz: 8, bold: true };
-      cell.s.alignment = { horizontal: "center", vertical: "center", wrapText: true };
-      cell.s.fill = headerFill;
-      cell.s.border = borderAll;
-    }
-  }
-
-  // Data rows: thin outer border, centered delay and LOS, left‑aligned text for intersection
-  for (let r = 3; r < totalRows; r++) {
-    for (let c = 0; c <= 12; c++) {
-      const addr = XLSX.utils.encode_cell({ r, c });
-      const cell = ws[addr];
-      if (!cell) continue;
-      if (!cell.s) cell.s = {};
-      cell.s.font = { name: "Segoe UI", sz: 8, bold: false };
-      cell.s.border = borderAll;
-
-      if (c === 2) {
-        cell.s.alignment = { horizontal: "left", vertical: "center", wrapText: true };
-      } else {
-        cell.s.alignment = { horizontal: "center", vertical: "center" };
-      }
-    }
-  }
-}
-
-// ─── Preview for first period ─────────────────────────────────────────────────
 function formatIntName(name) {
   const ampIdx = name.lastIndexOf(' & ');
   if (ampIdx === -1) return name;
@@ -744,6 +725,7 @@ function formatIntName(name) {
   return `${right} at ${left}`;
 }
 
+// ─── Preview (same as before) ─────────────────────────────────────────────────
 function renderPreviewCombined(scenarioData, period) {
   const section = document.getElementById('previewSection');
   const table   = document.getElementById('previewTable');
