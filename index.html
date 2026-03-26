@@ -188,7 +188,7 @@
       <li>Export your Synchro report as a <strong>.txt</strong> file (File → Reports → Text Report).</li>
       <li>Drop the file above or click to browse.</li>
       <li>Click <strong>Generate Excel File</strong>.</li>
-      <li>The Excel sheet downloads automatically — open it in Excel.</li>
+      <li>The Excel sheet downloads automatically with AM, PM, and SAT tabs — open it in Excel.</li>
     </ol>
   </div>
 </div>
@@ -506,19 +506,91 @@ function computeLOS(delay, control) {
   }
 }
 
+// ─── Sorting functions ────────────────────────────────────────────────────────
+function sortApproach(a, b) {
+  const order = ['EB', 'WB', 'NB', 'SB', 'Overall'];
+  const idxA = order.indexOf(a);
+  const idxB = order.indexOf(b);
+  if (idxA === -1 && idxB === -1) return a.localeCompare(b);
+  if (idxA === -1) return 1;
+  if (idxB === -1) return -1;
+  return idxA - idxB;
+}
+
+function sortLaneGroup(a, b, control) {
+  // For signalized: L, T, R, Approach
+  // For unsignalized: L, T, R
+  const order = control === 'S' ? ['L', 'T', 'R', 'Approach'] : ['L', 'T', 'R'];
+  const idxA = order.indexOf(a);
+  const idxB = order.indexOf(b);
+  if (idxA === -1 && idxB === -1) return a.localeCompare(b);
+  if (idxA === -1) return 1;
+  if (idxB === -1) return -1;
+  return idxA - idxB;
+}
+
+function sortRows(rows) {
+  return rows.sort((a, b) => {
+    // First by node
+    if (a.node !== b.node) return a.node - b.node;
+    
+    // Then by approach (EB, WB, NB, SB, Overall)
+    const approachCmp = sortApproach(a.approach, b.approach);
+    if (approachCmp !== 0) return approachCmp;
+    
+    // Then by lane group (L, T, R, Approach for signalized; L, T, R for unsignalized)
+    return sortLaneGroup(a.laneGroup, b.laneGroup, a.control);
+  });
+}
+
+function roundDelay(delay) {
+  if (delay == null || isNaN(delay)) return null;
+  return Math.round(delay * 10) / 10;
+}
+
 // ─── Excel builder ────────────────────────────────────────────────────────────
 function buildExcel(rows) {
   const wb = XLSX.utils.book_new();
-  const wsData = buildSheetData(rows);
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-  // Column widths
-  ws['!cols'] = [
-    {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
-    {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'LOS_Summary');
+  
+  // Sort rows
+  const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
+  
+  // Separate by period
+  const amRows = sortedRows.filter(r => /AM/i.test(r.period));
+  const pmRows = sortedRows.filter(r => /PM/i.test(r.period));
+  const satRows = sortedRows.filter(r => /SAT/i.test(r.period));
+  
+  // Create sheets
+  if (amRows.length > 0) {
+    const wsData = buildSheetData(amRows);
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws['!cols'] = [
+      {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
+      {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'AM');
+  }
+  
+  if (pmRows.length > 0) {
+    const wsData = buildSheetData(pmRows);
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws['!cols'] = [
+      {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
+      {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'PM');
+  }
+  
+  if (satRows.length > 0) {
+    const wsData = buildSheetData(satRows);
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws['!cols'] = [
+      {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
+      {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'SAT');
+  }
+  
   XLSX.writeFile(wb, 'LOS_Summary.xlsx');
 }
 
@@ -535,10 +607,13 @@ function buildSheetData(rows) {
     const showCtrl = r.node !== lastNode ? r.control : '';
     lastNode = r.node;
 
+    // Format delay to one decimal place
+    const delayStr = r.delay != null ? r.delay.toFixed(1) : '';
+
     out.push([
       showNode, showCtrl, showInt,
       r.approach, r.laneGroup,
-      r.delay, r.los,
+      delayStr, r.los,
       '', '', '', '', '', ''  // placeholder columns for other scenarios
     ]);
   }
@@ -568,28 +643,34 @@ function renderPreview(rows) {
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  const preview = rows.slice(0, 20);
+  
+  // Sort and round delays for preview
+  const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
+  const preview = sortedRows.slice(0, 20);
+  
   let lastNode = null;
   for (const r of preview) {
     const tr = document.createElement('tr');
     const losBadge = r.los ? `<span class="los-badge los-${r.los}">${r.los}</span>` : '';
+    const delayStr = r.delay != null ? r.delay.toFixed(1) : '';
+    
     tr.innerHTML = `
       <td>${r.node !== lastNode ? r.node : ''}</td>
       <td>${r.node !== lastNode ? r.control : ''}</td>
       <td style="max-width:260px;white-space:normal">${r.node !== lastNode ? formatIntName(r.intName) : ''}</td>
       <td>${r.approach}</td>
       <td>${r.laneGroup}</td>
-      <td>${r.delay != null ? r.delay : ''}</td>
+      <td>${delayStr}</td>
       <td>${losBadge}</td>
     `;
     tbody.appendChild(tr);
     lastNode = r.node;
   }
   table.appendChild(tbody);
-  if (rows.length > 20) {
+  if (sortedRows.length > 20) {
     const note = document.createElement('caption');
     note.style = 'caption-side:bottom;font-size:0.8rem;color:#6b7280;padding:6px';
-    note.textContent = `Showing 20 of ${rows.length} rows. All rows are included in the Excel file.`;
+    note.textContent = `Showing 20 of ${sortedRows.length} rows. All rows are included in the Excel file.`;
     table.appendChild(note);
   }
 }
