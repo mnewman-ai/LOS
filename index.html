@@ -283,27 +283,21 @@ function countIntersections(rows) {
 
 // ─── Tab name from filename ───────────────────────────────────────────────────
 function deriveTabName(filename) {
-  // Strip extension
   let base = filename.replace(/\.txt$/i, '').trim();
-
-  // We expect something like: "22700.00 EX AM" or "22700.00 BD MIT SAT"
-  // We don't actually need to remove the leading number; we just search for EX/NB/BD/BD MIT + AM/PM/SAT anywhere in the string.
 
   let scenario = '';
   let period = '';
 
-  // Scenario: check BD MIT first (more specific than BD)
   if (/BD\s*MIT/i.test(base)) {
     scenario = 'BD MIT';
-  } else if (/BD/i.test(base)) {
+  } else if (/\bBD\b/i.test(base)) {
     scenario = 'BD';
-  } else if (/NB/i.test(base)) {
+  } else if (/\bNB\b/i.test(base)) {
     scenario = 'NB';
-  } else if (/EX/i.test(base)) {
+  } else if (/\bEX\b/i.test(base)) {
     scenario = 'EX';
   }
 
-  // Period
   if (/\bSAT\b/i.test(base) || /SATURDAY/i.test(base)) {
     period = 'SAT';
   } else if (/\bPM\b/i.test(base)) {
@@ -315,8 +309,6 @@ function deriveTabName(filename) {
   if (scenario && period) return `${scenario} ${period}`;
   if (scenario) return scenario;
   if (period) return period;
-
-  // Fallback: first 31 chars of filename (Excel limit)
   return base.substring(0, 31);
 }
 
@@ -329,7 +321,6 @@ function parseSynchro(text) {
     if (!block.trim()) continue;
     const blockLines = block.split('\n');
 
-    // Header line: "N: Intersection Name\tPeak Period"
     let headerLine = '';
     for (const l of blockLines) {
       if (/^\d+:/.test(l.trim())) { headerLine = l.trim(); break; }
@@ -358,12 +349,70 @@ function parseSynchro(text) {
   return results;
 }
 
+// ── Helpers to read movement / lane config tables ────────────────────────────
+function parseMovementAndLaneConfig(blockLines) {
+  // Returns { movements: [ 'EBL', 'EBT', ... ], laneConfigRow: [ '1','2>','0',... ] }
+  let movementRow = null;
+  let laneConfigRow = null;
+  for (let i = 0; i < blockLines.length; i++) {
+    const line = blockLines[i];
+    const cells = line.split('\t');
+    const label = cells[0].trim();
+    if (/^Movement\s*$/i.test(label)) {
+      movementRow = cells.slice(1).map(c => c.trim());
+    }
+    if (/^Lane Configurations\s*$/i.test(label)) {
+      laneConfigRow = cells.slice(1).map(c => c.trim());
+    }
+  }
+  return { movements: movementRow, laneConfigs: laneConfigRow };
+}
+
+// Map lane header (from Minor Lane/Major Mvmt) to approach & movement code
+function mapMinorLaneToMovement(header, movements, laneConfigs) {
+  // header examples: NBLn1, EBL, EBT, WBL, SBLn1, etc.
+  const m = header.match(/^(EB|WB|NB|SB)/i);
+  if (!m) return null;
+  const approach = m[1].toUpperCase();
+
+  // Try to infer L/T/R from movement table if it exists
+  // Movement row is like: [EBL, EBT, EBR, WBL, ...] [1]📄
+  let movementCode = null;
+  if (movements && laneConfigs) {
+    for (let idx = 0; idx < movements.length; idx++) {
+      const mv = movements[idx];
+      if (!mv) continue;
+      const mvMatch = mv.match(/^(EB|WB|NB|SB)(L|T|R)/i);
+      if (!mvMatch) continue;
+      const mvApp = mvMatch[1].toUpperCase();
+      const mvDir = mvMatch[2].toUpperCase();
+      if (mvApp !== approach) continue;
+      // If lane config at this column has non-zero / non-blank, lane exists
+      const cfg = laneConfigs[idx] || '';
+      if (cfg && cfg !== '0' && cfg !== '-') {
+        // Use the movement direction (L/T/R)
+        movementCode = mvDir;
+        break;
+      }
+    }
+  }
+
+  if (!movementCode) {
+    // Fallback: infer from header itself
+    let suffix = header.replace(/^(EB|WB|NB|SB)/i, '').toUpperCase();
+    if (suffix.includes('L')) movementCode = 'L';
+    else if (suffix.includes('R')) movementCode = 'R';
+    else movementCode = 'T';
+  }
+
+  return { approach, movementCode };
+}
+
 // ── TWSC (unsignalized) parser ────────────────────────────────────────────────
-// Requirements:
-//  - No approach-level or overall LOS rows for unsignalized intersections.
-//  - Only lane-level rows for existing movements (no blank approaches).
 function parseTWSC(block, node, intName, period, control, results) {
   const lines = block.split('\n');
+
+  const { movements, laneConfigs } = parseMovementAndLaneConfig(lines);
 
   let laneDelays = {};
   let laneLOS    = {};
@@ -374,12 +423,9 @@ function parseTWSC(block, node, intName, period, control, results) {
     const cells = line.split('\t');
     const rowLabel = cells[0].trim();
 
-    // Minor Lane/Major Mvmt header row defines lane headers
     if (/Minor Lane\/Major Mvmt/i.test(rowLabel)) {
       laneHeaders = cells.slice(1).map(c => c.trim()).filter(Boolean);
     }
-
-    // Lane delays
     if (/HCM Ctrl Dly \(s\/v\)/i.test(rowLabel)) {
       const vals = cells.slice(1).map(c => c.trim());
       laneHeaders.forEach((h, idx) => {
@@ -389,8 +435,6 @@ function parseTWSC(block, node, intName, period, control, results) {
         }
       });
     }
-
-    // Lane LOS
     if (/HCM Lane LOS/i.test(rowLabel)) {
       const vals = cells.slice(1).map(c => c.trim());
       laneHeaders.forEach((h, idx) => {
@@ -401,27 +445,18 @@ function parseTWSC(block, node, intName, period, control, results) {
     }
   }
 
-  // Only build lane-level rows. If no lane headers exist, we do not create
-  // approach or overall rows (per requirement).
+  // Only lane-level rows, no approach/overall rows for unsignalized
   for (const h of laneHeaders) {
     if (!h || h === '-') continue;
-
-    // Derive approach (EB/WB/NB/SB) from header prefix
-    const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
-    const approach = approachMatch ? approachMatch[1].toUpperCase() : h;
-
-    // Simplify lane group: NBLn1 → R, WBL → L, EBT → T, etc.
-    let laneGroupRaw = h.replace(/^(EB|WB|NB|SB)/i, '');
-    laneGroupRaw = laneGroupRaw.replace('Ln1', 'R').replace('Ln2', '');
-    let laneGroup = laneGroupRaw || h;
-
-    // Normalize lane group to single L/T/R where possible
-    if (/L/i.test(laneGroup)) laneGroup = 'L';
-    else if (/T/i.test(laneGroup)) laneGroup = 'T';
-    else if (/R/i.test(laneGroup)) laneGroup = 'R';
-
     const delay = laneDelays[h];
-    if (delay == null || isNaN(delay)) continue; // skip blank/no-data lanes
+    if (delay == null || isNaN(delay)) continue;
+
+    const mapping = mapMinorLaneToMovement(h, movements, laneConfigs);
+    if (!mapping) continue;
+    const { approach, movementCode } = mapping;
+
+    // Lane group is L/T/R only
+    let laneGroup = movementCode;
 
     const los = laneLOS[h] || computeLOS(delay, 'U');
 
@@ -438,9 +473,11 @@ function parseTWSC(block, node, intName, period, control, results) {
   }
 }
 
-// ── Signalized parser ─────────────────────────────────────────────────────────
+// ── Signalized parser (with multi-direction lane groups) ─────────────────────
 function parseSignalized(block, node, intName, period, control, results) {
   const lines = block.split('\n');
+
+  const { movements, laneConfigs } = parseMovementAndLaneConfig(lines);
 
   let laneDelays = {};
   let laneLOS    = {};
@@ -448,7 +485,6 @@ function parseSignalized(block, node, intName, period, control, results) {
   let approachLOS    = {};
   let overallDelay   = null;
   let overallLOS     = null;
-
   let lgCols = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -456,42 +492,44 @@ function parseSignalized(block, node, intName, period, control, results) {
     const cells = line.split('\t');
     const rowLabel = cells[0].trim();
 
-    if (/^Lane Group\s*$/.test(rowLabel)) {
+    if (/^Lane Group\s*$/i.test(rowLabel)) {
       lgCols = [];
       for (let c = 2; c < cells.length; c++) {
         const v = cells[c].trim();
         if (!v) continue;
         const m = v.match(/^(EB|WB|NB|SB)(L|T|R|LT|TR|LR|LTR)?$/i);
-        if (m) lgCols.push({
-          col: c,
-          approach: m[1].toUpperCase(),
-          move: m[2] ? m[2].toUpperCase() : ''
-        });
+        if (m) {
+          lgCols.push({
+            col: c,
+            approach: m[1].toUpperCase(),
+            move: m[2] ? m[2].toUpperCase() : ''
+          });
+        }
       }
     }
 
-    if (/^(Control Delay|Total Delay)\s*\(s\/veh\)\s*$/.test(rowLabel)) {
+    if (/^(Control Delay|Total Delay)\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = parseFloat(cells[lc.col]);
         if (!isNaN(v)) laneDelays[lc.approach + lc.move] = v;
       });
     }
 
-    if (/^LOS\s*$/.test(rowLabel)) {
+    if (/^LOS\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = (cells[lc.col] || '').trim();
         if (v && v !== '-') laneLOS[lc.approach + lc.move] = v;
       });
     }
 
-    if (/^Approach Delay\s*\(s\/veh\)\s*$/.test(rowLabel)) {
+    if (/^Approach Delay\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = parseFloat(cells[lc.col]);
         if (!isNaN(v)) approachDelays[lc.approach] = v;
       });
     }
 
-    if (/^Approach LOS\s*$/.test(rowLabel)) {
+    if (/^Approach LOS\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = (cells[lc.col] || '').trim();
         if (v && v !== '-') approachLOS[lc.approach] = v;
@@ -504,20 +542,63 @@ function parseSignalized(block, node, intName, period, control, results) {
     if (losMatch) overallLOS = losMatch[1];
   }
 
-  // Lane-group rows
+  // Build combined lane groups by approach using Lane Configurations
+  // Example: EB has "2>" under EBT in Lane Configurations -> TTR lane group.
+  const approachToGroup = {}; // { EB: 'TTR', WB: 'LT', ... }
+
+  if (movements && laneConfigs) {
+    for (let idx = 0; idx < movements.length; idx++) {
+      const mv = movements[idx];
+      if (!mv) continue;
+      const cfg = laneConfigs[idx] || '';
+      if (!cfg || cfg === '-' || cfg === '0') continue;
+
+      const m = mv.match(/^(EB|WB|NB|SB)(L|T|R)$/i);
+      if (!m) continue;
+      const app = m[1].toUpperCase();
+      const dir = m[2].toUpperCase();
+
+      // Convert config string to a movement sequence, e.g. "2>" → "TTR"
+      const repetitions = cfg.replace(/[^0-9]/g, '') || '1';
+      const count = parseInt(repetitions, 10) || 1;
+      let seq = '';
+
+      if (dir === 'T' && />/.test(cfg)) {
+        // Through + right (Synchro style "2>") -> T...TR
+        // count-1 through + 1 right
+        if (count > 1) seq += 'T'.repeat(count - 1);
+        seq += 'TR';
+      } else {
+        seq += dir.repeat(count);
+      }
+
+      if (!approachToGroup[app]) approachToGroup[app] = '';
+      approachToGroup[app] += seq;
+    }
+  }
+
+  // Emit lane-group rows, using approachToGroup where possible
+  const seenApproaches = new Set();
+
   for (const [key, delay] of Object.entries(laneDelays)) {
     const m = key.match(/^(EB|WB|NB|SB)(.*)/);
     if (!m) continue;
     const approach = m[1];
     let move = m[2] || 'T';
 
-    // Normalize movement to L/T/R for ordering and clarity where possible
-    if (move === 'L') move = 'L';
-    else if (move === 'T' || move === '') move = 'T';
-    else if (move === 'R') move = 'R';
-    else if (move.includes('L') && !move.includes('R')) move = 'L';
-    else if (move.includes('R') && !move.includes('L')) move = 'R';
-    else if (move.includes('T')) move = 'T';
+    // If we built a composite lane group for this approach, use it
+    let laneGroup = approachToGroup[approach] || '';
+
+    if (!laneGroup) {
+      // Fallback: normalize movement to single L/T/R
+      if (move === 'L') laneGroup = 'L';
+      else if (move === 'T' || move === '') laneGroup = 'T';
+      else if (move === 'R') laneGroup = 'R';
+      else if (move.includes('L') && !move.includes('R')) laneGroup = 'L';
+      else if (move.includes('R') && !move.includes('L')) laneGroup = 'R';
+      else if (move.includes('T')) laneGroup = 'T';
+      else laneGroup = move;
+    }
 
     const los = laneLOS[key] || computeLOS(delay, 'S');
 
@@ -527,10 +608,11 @@ function parseSignalized(block, node, intName, period, control, results) {
       intName,
       period,
       approach,
-      laneGroup: move,
+      laneGroup,
       delay,
       los
     });
+    seenApproaches.add(approach);
   }
 
   // Approach rows (signalized only, laneGroup = "Approach")
