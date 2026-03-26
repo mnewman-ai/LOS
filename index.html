@@ -160,7 +160,7 @@
 
 <div class="card">
   <h1>Synchro LOS Parser</h1>
-  <p class="subtitle">Drop in multiple Synchro reports and get a combined Excel summary organized by time period.</p>
+  <p class="subtitle">Drop in multiple Synchro reports and get a combined Excel LOS summary by peak hour.</p>
 
   <div class="drop-zone" id="dropZone">
     <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
@@ -168,7 +168,7 @@
         d="M12 16v-8m0 0-3 3m3-3 3 3M4.5 19.5h15A2.25 2.25 0 0 0 21.75 17V9.75A2.25 2.25 0 0 0 19.5 7.5h-3.75L14.25 5.25H9.75L8.25 7.5H4.5A2.25 2.25 0 0 0 2.25 9.75V17A2.25 2.25 0 0 0 4.5 19.5Z"/>
     </svg>
     <p>Click or drag &amp; drop your Synchro reports here</p>
-    <span>Upload all scenarios for each time period (e.g., EX AM, NB AM, BD AM, BD MIT AM)</span>
+    <span>Upload all scenarios for each time period (e.g., 22700.00 EX AM.txt, NB AM.txt, BD AM.txt)</span>
     <div class="file-name" id="fileName"></div>
   </div>
   <input type="file" id="fileInput" accept=".txt" multiple />
@@ -187,11 +187,11 @@
   <div class="how-to">
     <h3>How to use</h3>
     <ol>
-      <li>Export your Synchro reports as <strong>.txt</strong> files for all scenarios and time periods.</li>
-      <li>Name files clearly: <strong>22700.00 EX AM.txt</strong>, <strong>22700.00 NB PM.txt</strong>, <strong>22700.00 BD SAT.txt</strong>, etc.</li>
+      <li>Export Synchro reports as <strong>.txt</strong> for all scenarios and time periods.</li>
+      <li>Name files like <strong>22700.00 EX AM.txt</strong>, <strong>22700.00 NB PM.txt</strong>, <strong>22700.00 BD SAT.txt</strong>, etc.</li>
       <li>Drop all files at once (or select multiple files).</li>
       <li>Click <strong>Generate Excel File</strong>.</li>
-      <li>Excel will have tabs for AM, PM, SAT with all scenarios in columns (Existing, No-Build, Build, Build with Mitigation).</li>
+      <li>Excel will have tabs for <strong>AM</strong>, <strong>PM</strong>, and <strong>SAT</strong> with Existing / No‑Build / Build / Build MIT columns.</li>
     </ol>
   </div>
 </div>
@@ -243,15 +243,12 @@ function loadFiles(files) {
 parseBtn.addEventListener('click', () => {
   if (!loadedFiles.length) return;
   try {
-    // Parse all files and group by period
-    const dataByPeriod = {}; // { 'AM': { 'EX': [rows], 'NB': [rows], ... }, 'PM': {...}, 'SAT': {...} }
+    const dataByPeriod = {}; // { 'AM': { 'EX': [rows], 'NB': [rows], ... }, ... }
     
     for (const file of loadedFiles) {
       const rows = parseSynchro(file.content);
       if (!rows.length) continue;
-      
       const { scenario, period } = parseFilename(file.name);
-      
       if (!dataByPeriod[period]) dataByPeriod[period] = {};
       dataByPeriod[period][scenario] = rows;
     }
@@ -263,7 +260,6 @@ parseBtn.addEventListener('click', () => {
 
     buildCombinedExcel(dataByPeriod);
     
-    // Preview first period
     const firstPeriod = Object.keys(dataByPeriod).sort()[0];
     renderPreviewCombined(dataByPeriod[firstPeriod], firstPeriod);
     
@@ -288,7 +284,6 @@ function parseFilename(filename) {
   let scenario = 'EX'; // default
   let period = 'AM';   // default
   
-  // Scenario detection (order matters: check BD MIT before BD)
   if (/BD\s*MIT/i.test(base)) {
     scenario = 'BD MIT';
   } else if (/\bBD\b/i.test(base)) {
@@ -299,7 +294,6 @@ function parseFilename(filename) {
     scenario = 'EX';
   }
   
-  // Period detection
   if (/\bSAT\b/i.test(base) || /SATURDAY/i.test(base)) {
     period = 'SAT';
   } else if (/\bPM\b/i.test(base)) {
@@ -329,7 +323,7 @@ function parseSynchro(text) {
     const headerMatch = headerLine.match(/^(\d+):\s*(.+?)\t(.+)$/);
     if (!headerMatch) continue;
 
-    const node   = parseInt(headerMatch[1], 10);
+    const node    = parseInt(headerMatch[1], 10);
     const intName = headerMatch[2].trim();
     const period  = headerMatch[3].trim();
 
@@ -347,6 +341,7 @@ function parseSynchro(text) {
   return results;
 }
 
+// ── TWSC (unsignalized) parser ────────────────────────────────────────────────
 function parseTWSC(block, node, intName, period, control, results) {
   const lines = block.split('\n');
   let minorHeaderCells = null;
@@ -366,8 +361,8 @@ function parseTWSC(block, node, intName, period, control, results) {
     if (/HCM Ctrl Dly \(s\/v\)/i.test(rowLabel) && minorHeaderCells) {
       const len = Math.max(minorHeaderCells.length, cells.length);
       for (let c = 1; c < len; c++) {
-        const h = (minorHeaderCells[c] || '').trim();
-        const vStr = (cells[c] || '').trim();
+        const h    = (minorHeaderCells[c] || '').trim();
+        const vStr = (cells[c]           || '').trim();
         if (!h || !vStr || vStr === '-') continue;
         const v = parseFloat(vStr);
         if (isNaN(v)) continue;
@@ -378,8 +373,8 @@ function parseTWSC(block, node, intName, period, control, results) {
     if (/HCM Lane LOS/i.test(rowLabel) && minorHeaderCells) {
       const len = Math.max(minorHeaderCells.length, cells.length);
       for (let c = 1; c < len; c++) {
-        const h = (minorHeaderCells[c] || '').trim();
-        const losStr = (cells[c] || '').trim();
+        const h      = (minorHeaderCells[c] || '').trim();
+        const losStr = (cells[c]           || '').trim();
         if (!h || !losStr || losStr === '-') continue;
         laneLOS[h] = losStr;
       }
@@ -406,14 +401,15 @@ function parseTWSC(block, node, intName, period, control, results) {
   }
 }
 
+// ── Signalized parser ─────────────────────────────────────────────────────────
 function parseSignalized(block, node, intName, period, control, results) {
   const lines = block.split('\n');
   let laneDelays = {};
-  let laneLOS = {};
+  let laneLOS    = {};
   let approachDelays = {};
-  let approachLOS = {};
-  let overallDelay = null;
-  let overallLOS = null;
+  let approachLOS    = {};
+  let overallDelay   = null;
+  let overallLOS     = null;
   let lgCols = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -551,47 +547,67 @@ function roundDelay(delay) {
   return Math.round(delay * 10) / 10;
 }
 
-// ─── Combined Excel builder ───────────────────────────────────────────────────
+// ─── Combined Excel builder with formatting ───────────────────────────────────
 function buildCombinedExcel(dataByPeriod) {
   const wb = XLSX.utils.book_new();
-  
   const periods = ['AM', 'PM', 'SAT'].filter(p => dataByPeriod[p]);
-  
+
   periods.forEach(period => {
     const scenarioData = dataByPeriod[period];
-    const wsData = buildCombinedSheetData(scenarioData);
+    const wsData = buildCombinedSheetData(scenarioData, period);
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    
+
+    // Column widths
     ws['!cols'] = [
-      {wch:6}, {wch:8}, {wch:55}, {wch:10}, {wch:12},
-      {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}, {wch:8}, {wch:6}
+      {wch:6},  // Node
+      {wch:8},  // Control
+      {wch:55}, // Intersection
+      {wch:10}, // Approach
+      {wch:12}, // Lane Group
+      {wch:8}, {wch:6}, // Existing Delay/LOS
+      {wch:8}, {wch:6}, // No-Build
+      {wch:8}, {wch:6}, // Build
+      {wch:8}, {wch:6}  // Build MIT
     ];
-    
+
+    applyTemplateMergesAndStyles(ws, period, wsData.length);
+
     XLSX.utils.book_append_sheet(wb, ws, period);
   });
-  
+
   XLSX.writeFile(wb, 'LOS_Summary.xlsx');
 }
 
-function buildCombinedSheetData(scenarioData) {
-  // scenarioData = { 'EX': [rows], 'NB': [rows], 'BD': [rows], 'BD MIT': [rows] }
-  
-  const header1 = ['', '', '', '', '', 'Existing', '', 'No-Build', '', 'Build', '', 'Build with Mitigation', ''];
-  const header2 = ['Synchro Node #', 'Control', 'Intersection', 'Approach', 'Lane Group',
-                   'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS'];
-  const out = [header1, header2];
-  
-  // Get all unique intersection/approach/lane combinations
+function buildCombinedSheetData(scenarioData, periodLabel) {
+  // Row 0: period title (e.g., "AM") in A1; other cells left blank
+  const titleRow = [periodLabel];
+  while (titleRow.length < 13) titleRow.push('');
+
+  // Row 1 + 2: headers matching template style
+  const header1 = [
+    'Synchro Node #', 'CONTROL', 'Intersection', 'Approach', 'Lane Group',
+    'Existing', '', 'No-Build', '', 'Build', '', 'Build with Mitigation', ''
+  ];
+  const header2 = [
+    '', '', '', '', '',
+    'Delay', 'LOS',
+    'Delay', 'LOS',
+    'Delay', 'LOS',
+    'Delay', 'LOS'
+  ];
+
+  const out = [titleRow, header1, header2];
+
   const allKeys = new Set();
-  const dataMap = {}; // key -> { node, control, intName, approach, laneGroup, scenarios: { EX: {delay, los}, ... } }
-  
+  const dataMap = {};
+
   for (const [scenario, rows] of Object.entries(scenarioData)) {
     const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
-    
+
     sortedRows.forEach(r => {
       const key = `${r.node}|${r.control}|${r.intName}|${r.approach}|${r.laneGroup}`;
       allKeys.add(key);
-      
+
       if (!dataMap[key]) {
         dataMap[key] = {
           node: r.node,
@@ -602,49 +618,124 @@ function buildCombinedSheetData(scenarioData) {
           scenarios: {}
         };
       }
-      
+
       dataMap[key].scenarios[scenario] = { delay: r.delay, los: r.los };
     });
   }
-  
-  // Sort keys by node, approach, lane group
+
   const sortedKeys = Array.from(allKeys).sort((a, b) => {
     const [nodeA, ctrlA, intA, appA, lgA] = a.split('|');
     const [nodeB, ctrlB, intB, appB, lgB] = b.split('|');
-    
     if (parseInt(nodeA) !== parseInt(nodeB)) return parseInt(nodeA) - parseInt(nodeB);
     const appCmp = sortApproach(appA, appB);
     if (appCmp !== 0) return appCmp;
     return sortLaneGroup(lgA, lgB, ctrlA);
   });
-  
+
   let lastNode = null;
-  
+
   sortedKeys.forEach(key => {
     const data = dataMap[key];
     const showNode = data.node !== lastNode ? data.node : '';
     const showInt  = data.node !== lastNode ? formatIntName(data.intName) : '';
     const showCtrl = data.node !== lastNode ? data.control : '';
     lastNode = data.node;
-    
-    const exData = data.scenarios['EX'] || {};
-    const nbData = data.scenarios['NB'] || {};
-    const bdData = data.scenarios['BD'] || {};
+
+    const exData  = data.scenarios['EX']     || {};
+    const nbData  = data.scenarios['NB']     || {};
+    const bdData  = data.scenarios['BD']     || {};
     const mitData = data.scenarios['BD MIT'] || {};
-    
+
     out.push([
-      showNode, showCtrl, showInt,
-      data.approach, data.laneGroup,
-      exData.delay != null ? exData.delay.toFixed(1) : '', exData.los || '',
-      nbData.delay != null ? nbData.delay.toFixed(1) : '', nbData.los || '',
-      bdData.delay != null ? bdData.delay.toFixed(1) : '', bdData.los || '',
-      mitData.delay != null ? mitData.delay.toFixed(1) : '', mitData.los || ''
+      showNode,
+      showCtrl,
+      showInt,
+      data.approach,
+      data.laneGroup,
+      exData.delay  != null ? exData.delay.toFixed(1)  : '',
+      exData.los   || '',
+      nbData.delay  != null ? nbData.delay.toFixed(1)  : '',
+      nbData.los   || '',
+      bdData.delay  != null ? bdData.delay.toFixed(1)  : '',
+      bdData.los   || '',
+      mitData.delay != null ? mitData.delay.toFixed(1) : '',
+      mitData.los  || ''
     ]);
   });
-  
+
   return out;
 }
 
+// ─── Apply merges + styles to match template ─────────────────────────────────
+function applyTemplateMergesAndStyles(ws, periodLabel, totalRows) {
+  if (!ws['!merges']) ws['!merges'] = [];
+
+  // Title row: merge A1 through M1
+  ws['!merges'].push({ s: { r:0, c:0 }, e: { r:0, c:12 } });
+
+  // Header merges:
+  // Vertically merge Node/Control/Intersection/Approach/LaneGroup over rows 2 & 3
+  for (let c = 0; c <= 4; c++) {
+    ws['!merges'].push({ s: { r:1, c }, e: { r:2, c } });
+  }
+  // Scenario labels: Existing, No-Build, Build, Build MIT in row 2 across Delay+LOS columns
+  ws['!merges'].push({ s:{r:1,c:5}, e:{r:1,c:6} });  // Existing
+  ws['!merges'].push({ s:{r:1,c:7}, e:{r:1,c:8} });  // No-Build
+  ws['!merges'].push({ s:{r:1,c:9}, e:{r:1,c:10} }); // Build
+  ws['!merges'].push({ s:{r:1,c:11}, e:{r:1,c:12} }); // Build MIT
+
+  // Title cell value
+  ws['A1'].v = periodLabel;
+
+  // Styles
+  const headerFill = { patternType: "solid", fgColor: { rgb: "FFD9D9D9" } };
+  const titleFill  = { patternType: "solid", fgColor: { rgb: "FFFFFFFF" } };
+  const borderAll  = {
+    top:    { style: "thin", color: { rgb: "FF000000" } },
+    bottom: { style: "thin", color: { rgb: "FF000000" } },
+    left:   { style: "thin", color: { rgb: "FF000000" } },
+    right:  { style: "thin", color: { rgb: "FF000000" } }
+  };
+
+  // Title style
+  if (!ws['A1'].s) ws['A1'].s = {};
+  ws['A1'].s.font = { name: "Segoe UI", sz: 8, bold: true };
+  ws['A1'].s.alignment = { horizontal: "left", vertical: "center" };
+  ws['A1'].s.fill = titleFill;
+
+  // Header rows (row 2 & 3 in Excel: indices 1 and 2)
+  for (let r = 1; r <= 2; r++) {
+    for (let c = 0; c <= 12; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[addr] || (ws[addr] = { t:'s', v:'' });
+      if (!cell.s) cell.s = {};
+      cell.s.font = { name: "Segoe UI", sz: 8, bold: true };
+      cell.s.alignment = { horizontal: "center", vertical: "center", wrapText: true };
+      cell.s.fill = headerFill;
+      cell.s.border = borderAll;
+    }
+  }
+
+  // Data rows: thin outer border, centered delay and LOS, left‑aligned text for intersection
+  for (let r = 3; r < totalRows; r++) {
+    for (let c = 0; c <= 12; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[addr];
+      if (!cell) continue;
+      if (!cell.s) cell.s = {};
+      cell.s.font = { name: "Segoe UI", sz: 8, bold: false };
+      cell.s.border = borderAll;
+
+      if (c === 2) {
+        cell.s.alignment = { horizontal: "left", vertical: "center", wrapText: true };
+      } else {
+        cell.s.alignment = { horizontal: "center", vertical: "center" };
+      }
+    }
+  }
+}
+
+// ─── Preview for first period ─────────────────────────────────────────────────
 function formatIntName(name) {
   const ampIdx = name.lastIndexOf(' & ');
   if (ampIdx === -1) return name;
@@ -653,7 +744,6 @@ function formatIntName(name) {
   return `${right} at ${left}`;
 }
 
-// ─── Preview ──────────────────────────────────────────────────────────────────
 function renderPreviewCombined(scenarioData, period) {
   const section = document.getElementById('previewSection');
   const table   = document.getElementById('previewTable');
@@ -673,18 +763,16 @@ function renderPreviewCombined(scenarioData, period) {
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  
-  // Build combined data
   const allKeys = new Set();
   const dataMap = {};
-  
+
   for (const [scenario, rows] of Object.entries(scenarioData)) {
     const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
-    
+
     sortedRows.forEach(r => {
       const key = `${r.node}|${r.control}|${r.intName}|${r.approach}|${r.laneGroup}`;
       allKeys.add(key);
-      
+
       if (!dataMap[key]) {
         dataMap[key] = {
           node: r.node,
@@ -695,41 +783,40 @@ function renderPreviewCombined(scenarioData, period) {
           scenarios: {}
         };
       }
-      
+
       dataMap[key].scenarios[scenario] = { delay: r.delay, los: r.los };
     });
   }
-  
+
   const sortedKeys = Array.from(allKeys).sort((a, b) => {
     const [nodeA, ctrlA, intA, appA, lgA] = a.split('|');
     const [nodeB, ctrlB, intB, appB, lgB] = b.split('|');
-    
     if (parseInt(nodeA) !== parseInt(nodeB)) return parseInt(nodeA) - parseInt(nodeB);
     const appCmp = sortApproach(appA, appB);
     if (appCmp !== 0) return appCmp;
     return sortLaneGroup(lgA, lgB, ctrlA);
   });
-  
+
   const preview = sortedKeys.slice(0, 20);
   let lastNode = null;
-  
+
   preview.forEach(key => {
     const data = dataMap[key];
     const tr = document.createElement('tr');
-    
-    const exData = data.scenarios['EX'] || {};
-    const nbData = data.scenarios['NB'] || {};
-    const bdData = data.scenarios['BD'] || {};
+
+    const exData  = data.scenarios['EX']     || {};
+    const nbData  = data.scenarios['NB']     || {};
+    const bdData  = data.scenarios['BD']     || {};
     const mitData = data.scenarios['BD MIT'] || {};
-    
+
     const showNode = data.node !== lastNode ? data.node : '';
     const showInt  = data.node !== lastNode ? formatIntName(data.intName) : '';
     const showCtrl = data.node !== lastNode ? data.control : '';
     lastNode = data.node;
-    
-    const makeBadge = (los) => los ? `<span class="los-badge los-${los}">${los}</span>` : '';
-    const makeDelay = (d) => d != null ? d.toFixed(1) : '';
-    
+
+    const makeBadge = los => los ? `<span class="los-badge los-${los}">${los}</span>` : '';
+    const makeDelay = d => d != null ? d.toFixed(1) : '';
+
     tr.innerHTML = `
       <td>${showNode}</td>
       <td>${showCtrl}</td>
@@ -749,7 +836,7 @@ function renderPreviewCombined(scenarioData, period) {
   });
 
   table.appendChild(tbody);
-  
+
   if (sortedKeys.length > 20) {
     const note = document.createElement('caption');
     note.style = 'caption-side:bottom;font-size:0.8rem;color:#6b7280;padding:6px';
