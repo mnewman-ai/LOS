@@ -305,7 +305,7 @@ function parseFilename(filename) {
   return { scenario, period };
 }
 
-// ─── Parser (same as before) ──────────────────────────────────────────────────
+// ─── Parser with lane configuration logic ────────────────────────────────────
 function parseSynchro(text) {
   const results = [];
   const rawBlocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\f');
@@ -341,8 +341,59 @@ function parseSynchro(text) {
   return results;
 }
 
+// ─── Helper: Parse Movement and Lane Configurations ──────────────────────────
+function parseMovementAndLaneConfig(blockLines) {
+  let movements = null;
+  let laneConfigs = null;
+
+  for (let i = 0; i < blockLines.length; i++) {
+    const line = blockLines[i];
+    const cells = line.split('\t');
+    const label = (cells[0] || '').trim();
+
+    if (/^Movement\s*$/i.test(label)) {
+      movements = cells.slice(1).map(c => c.trim());
+    }
+    if (/^Lane Configurations\s*$/i.test(label)) {
+      laneConfigs = cells.slice(1).map(c => c.trim());
+    }
+  }
+
+  return { movements, laneConfigs };
+}
+
+// ─── Helper: Derive lane group from lane config string ───────────────────────
+function deriveLaneGroup(config) {
+  if (!config || config === '0' || config === '-') return '';
+  
+  // Extract number and symbols
+  const hasLeft = /</.test(config);
+  const hasRight = />/.test(config);
+  const numStr = config.replace(/[<>]/g, '');
+  const num = parseInt(numStr, 10) || 1;
+
+  if (hasLeft && hasRight) {
+    // <1> = shared left/through/right
+    return 'LTR';
+  } else if (hasLeft) {
+    // <1 = shared left/through
+    return 'LT';
+  } else if (hasRight) {
+    // 1> or 2> = through + right
+    if (num === 1) return 'TR';
+    // Multiple through lanes with right: e.g., 2> → TTR
+    return 'T'.repeat(num - 1) + 'TR';
+  } else {
+    // Just a number: repeat the movement type
+    return num.toString(); // We'll handle this per movement type
+  }
+}
+
+// ─── TWSC (unsignalized) parser ───────────────────────────────────────────────
 function parseTWSC(block, node, intName, period, control, results) {
   const lines = block.split('\n');
+  const { movements, laneConfigs } = parseMovementAndLaneConfig(lines);
+
   let minorHeaderCells = null;
   let laneDelays = {};
   let laneLOS = {};
@@ -380,19 +431,17 @@ function parseTWSC(block, node, intName, period, control, results) {
     }
   }
 
+  // Build lane group from movements/laneConfigs
+  const laneGroupMap = buildLaneGroupMap(movements, laneConfigs);
+
   for (const [h, delay] of Object.entries(laneDelays)) {
     if (delay == null || isNaN(delay)) continue;
 
     const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
     const approach = approachMatch ? approachMatch[1].toUpperCase() : h;
 
-    let lgRaw = h.replace(/^(EB|WB|NB|SB)/i, '');
-    lgRaw = lgRaw.replace('Ln1', 'R').replace('Ln2', '');
-    let laneGroup = lgRaw || h;
-
-    if (/L/i.test(laneGroup)) laneGroup = 'L';
-    else if (/T/i.test(laneGroup)) laneGroup = 'T';
-    else if (/R/i.test(laneGroup)) laneGroup = 'R';
+    // Use lane group from config if available
+    let laneGroup = laneGroupMap[approach] || 'L'; // fallback
 
     const los = laneLOS[h] || computeLOS(delay, 'U');
 
@@ -400,8 +449,11 @@ function parseTWSC(block, node, intName, period, control, results) {
   }
 }
 
+// ─── Signalized parser ────────────────────────────────────────────────────────
 function parseSignalized(block, node, intName, period, control, results) {
   const lines = block.split('\n');
+  const { movements, laneConfigs } = parseMovementAndLaneConfig(lines);
+
   let laneDelays = {};
   let laneLOS    = {};
   let approachDelays = {};
@@ -462,32 +514,65 @@ function parseSignalized(block, node, intName, period, control, results) {
     if (losMatch) overallLOS = losMatch[1];
   }
 
+  // Build lane group map from movements/laneConfigs
+  const laneGroupMap = buildLaneGroupMap(movements, laneConfigs);
+
+  // Emit lane-group rows using config-based lane groups
   for (const [key, delay] of Object.entries(laneDelays)) {
     const m = key.match(/^(EB|WB|NB|SB)(.*)/);
     if (!m) continue;
     const approach = m[1];
-    let move = m[2] || 'T';
 
-    let laneGroup;
-    if (move === 'L') laneGroup = 'L';
-    else if (move === 'T' || move === '') laneGroup = 'T';
-    else if (move === 'R') laneGroup = 'R';
-    else if (move.includes('L') && !move.includes('R')) laneGroup = 'L';
-    else if (move.includes('R') && !move.includes('L')) laneGroup = 'R';
-    else if (move.includes('T')) laneGroup = 'T';
-    else laneGroup = move;
-
+    const laneGroup = laneGroupMap[approach] || 'T';
     const los = laneLOS[key] || computeLOS(delay, 'S');
     results.push({ node, control, intName, period, approach, laneGroup, delay, los });
   }
 
+  // Approach rows
   for (const [approach, delay] of Object.entries(approachDelays)) {
     results.push({ node, control, intName, period, approach, laneGroup: 'Approach', delay, los: approachLOS[approach] || computeLOS(delay, 'S') });
   }
 
+  // Overall
   if (overallDelay != null) {
     results.push({ node, control, intName, period, approach: 'Overall', laneGroup: '', delay: overallDelay, los: overallLOS || computeLOS(overallDelay, 'S') });
   }
+}
+
+// ─── Build lane group map from movements/laneConfigs ─────────────────────────
+function buildLaneGroupMap(movements, laneConfigs) {
+  const map = {}; // { EB: 'LTR', WB: 'TTR', ... }
+
+  if (!movements || !laneConfigs) return map;
+
+  for (let i = 0; i < movements.length; i++) {
+    const mv = movements[i];
+    if (!mv) continue;
+
+    const m = mv.match(/^(EB|WB|NB|SB)(L|T|R)$/i);
+    if (!m) continue;
+
+    const approach = m[1].toUpperCase();
+    const moveType = m[2].toUpperCase();
+    const config = laneConfigs[i] || '';
+
+    if (!config || config === '0' || config === '-') continue;
+
+    const laneGroup = deriveLaneGroup(config);
+
+    // For turn lanes (L or R), just use the movement type repeated by count
+    if (moveType === 'L' || moveType === 'R') {
+      const num = parseInt(config.replace(/[<>]/g, ''), 10) || 1;
+      if (!map[approach]) map[approach] = '';
+      map[approach] += moveType.repeat(num);
+    } else if (moveType === 'T') {
+      // Through lanes: use derived lane group
+      if (!map[approach]) map[approach] = '';
+      map[approach] += laneGroup;
+    }
+  }
+
+  return map;
 }
 
 function computeLOS(delay, control) {
@@ -545,7 +630,7 @@ function roundDelay(delay) {
   return Math.round(delay * 10) / 10;
 }
 
-// ─── Excel builder with ExcelJS (full formatting + merging) ───────────────────
+// ─── Excel builder with ExcelJS ───────────────────────────────────────────────
 async function buildCombinedExcel(dataByPeriod) {
   const workbook = new ExcelJS.Workbook();
   const periods = ['AM', 'PM', 'SAT'].filter(p => dataByPeriod[p]);
@@ -568,51 +653,39 @@ async function buildCombinedExcel(dataByPeriod) {
 }
 
 function buildFormattedSheet(ws, scenarioData, periodLabel) {
-  // Column widths
   ws.columns = [
-    { width: 6 },  // Node
-    { width: 8 },  // Control
-    { width: 55 }, // Intersection
-    { width: 10 }, // Approach
-    { width: 12 }, // Lane Group
-    { width: 8 }, { width: 6 }, // Existing
-    { width: 8 }, { width: 6 }, // No-Build
-    { width: 8 }, { width: 6 }, // Build
-    { width: 8 }, { width: 6 }  // Build MIT
+    { width: 6 },  { width: 8 },  { width: 55 }, { width: 10 }, { width: 12 },
+    { width: 8 }, { width: 6 }, { width: 8 }, { width: 6 },
+    { width: 8 }, { width: 6 }, { width: 8 }, { width: 6 }
   ];
 
-  // Row 1: Title
   ws.getCell('A1').value = periodLabel;
   ws.mergeCells('A1:M1');
   ws.getCell('A1').font = { name: 'Segoe UI', size: 8, bold: true };
   ws.getCell('A1').alignment = { horizontal: 'left', vertical: 'middle' };
 
-  // Row 2: Header row 1
   const header1 = ws.getRow(2);
   header1.values = [
     'Synchro Node #', 'CONTROL', 'Intersection', 'Approach', 'Lane Group',
     'Existing', '', 'No-Build', '', 'Build', '', 'Build with Mitigation', ''
   ];
   
-  // Row 3: Header row 2
   const header2 = ws.getRow(3);
   header2.values = [
     '', '', '', '', '',
     'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS'
   ];
 
-  // Merge header cells
-  ws.mergeCells('A2:A3'); // Node
-  ws.mergeCells('B2:B3'); // Control
-  ws.mergeCells('C2:C3'); // Intersection
-  ws.mergeCells('D2:D3'); // Approach
-  ws.mergeCells('E2:E3'); // Lane Group
-  ws.mergeCells('F2:G2'); // Existing
-  ws.mergeCells('H2:I2'); // No-Build
-  ws.mergeCells('J2:K2'); // Build
-  ws.mergeCells('L2:M2'); // Build MIT
+  ws.mergeCells('A2:A3');
+  ws.mergeCells('B2:B3');
+  ws.mergeCells('C2:C3');
+  ws.mergeCells('D2:D3');
+  ws.mergeCells('E2:E3');
+  ws.mergeCells('F2:G2');
+  ws.mergeCells('H2:I2');
+  ws.mergeCells('J2:K2');
+  ws.mergeCells('L2:M2');
 
-  // Style headers
   const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
   const headerFont = { name: 'Segoe UI', size: 8, bold: true };
   const headerAlignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
@@ -633,7 +706,6 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
     }
   }
 
-  // Build data
   const allKeys = new Set();
   const dataMap = {};
 
@@ -669,7 +741,7 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
   });
 
   let rowNum = 4;
-  const dataRows = []; // Store row data for merging later
+  const dataRows = [];
 
   sortedKeys.forEach(key => {
     const data = dataMap[key];
@@ -696,15 +768,14 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
       mitData.los  || ''
     ];
 
-    // Store for merging
     dataRows.push({
       rowNum,
       node: data.node,
+      control: data.control,
       intName: formatIntName(data.intName),
       approach: data.approach
     });
 
-    // Style data rows
     const dataFont = { name: 'Segoe UI', size: 8 };
     const centerAlign = { horizontal: 'center', vertical: 'middle' };
     const leftAlign = { horizontal: 'left', vertical: 'middle', wrapText: true };
@@ -719,12 +790,49 @@ function buildFormattedSheet(ws, scenarioData, periodLabel) {
     rowNum++;
   });
 
-  // Apply merges for intersection names (column C) and approaches (column D)
   applyDataMerges(ws, dataRows);
 }
 
 function applyDataMerges(ws, dataRows) {
-  // Merge intersection names (column C = 3)
+  // Merge Node (column A = 1)
+  let nodeStart = null;
+  let lastNode = null;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const curr = dataRows[i];
+    
+    if (curr.node !== lastNode) {
+      if (nodeStart !== null && i - 1 > nodeStart) {
+        ws.mergeCells(dataRows[nodeStart].rowNum, 1, dataRows[i - 1].rowNum, 1);
+      }
+      nodeStart = i;
+      lastNode = curr.node;
+    }
+  }
+  if (nodeStart !== null && dataRows.length - 1 > nodeStart) {
+    ws.mergeCells(dataRows[nodeStart].rowNum, 1, dataRows[dataRows.length - 1].rowNum, 1);
+  }
+
+  // Merge Control (column B = 2)
+  let ctrlStart = null;
+  let lastCtrl = null;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const curr = dataRows[i];
+    
+    if (curr.control !== lastCtrl) {
+      if (ctrlStart !== null && i - 1 > ctrlStart) {
+        ws.mergeCells(dataRows[ctrlStart].rowNum, 2, dataRows[i - 1].rowNum, 2);
+      }
+      ctrlStart = i;
+      lastCtrl = curr.control;
+    }
+  }
+  if (ctrlStart !== null && dataRows.length - 1 > ctrlStart) {
+    ws.mergeCells(dataRows[ctrlStart].rowNum, 2, dataRows[dataRows.length - 1].rowNum, 2);
+  }
+
+  // Merge Intersection (column C = 3)
   let intStart = null;
   let lastInt = null;
 
@@ -732,21 +840,18 @@ function applyDataMerges(ws, dataRows) {
     const curr = dataRows[i];
     
     if (curr.intName !== lastInt) {
-      // Finish previous merge
       if (intStart !== null && i - 1 > intStart) {
         ws.mergeCells(dataRows[intStart].rowNum, 3, dataRows[i - 1].rowNum, 3);
       }
-      // Start new merge
       intStart = i;
       lastInt = curr.intName;
     }
   }
-  // Finish last merge
   if (intStart !== null && dataRows.length - 1 > intStart) {
     ws.mergeCells(dataRows[intStart].rowNum, 3, dataRows[dataRows.length - 1].rowNum, 3);
   }
 
-  // Merge approaches (column D = 4)
+  // Merge Approach (column D = 4)
   let appStart = null;
   let lastApp = null;
 
@@ -754,16 +859,13 @@ function applyDataMerges(ws, dataRows) {
     const curr = dataRows[i];
     
     if (curr.approach !== lastApp) {
-      // Finish previous merge
       if (appStart !== null && i - 1 > appStart) {
         ws.mergeCells(dataRows[appStart].rowNum, 4, dataRows[i - 1].rowNum, 4);
       }
-      // Start new merge
       appStart = i;
       lastApp = curr.approach;
     }
   }
-  // Finish last merge
   if (appStart !== null && dataRows.length - 1 > appStart) {
     ws.mergeCells(dataRows[appStart].rowNum, 4, dataRows[dataRows.length - 1].rowNum, 4);
   }
@@ -777,7 +879,7 @@ function formatIntName(name) {
   return `${right} at ${left}`;
 }
 
-// ─── Preview (same as before) ─────────────────────────────────────────────────
+// ─── Preview ──────────────────────────────────────────────────────────────────
 function renderPreviewCombined(scenarioData, period) {
   const section = document.getElementById('previewSection');
   const table   = document.getElementById('previewTable');
