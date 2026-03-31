@@ -305,7 +305,7 @@ function parseFilename(filename) {
   return { scenario, period };
 }
 
-// ─── Parser with lane configuration logic ────────────────────────────────────
+// ─── Parser with both format support ──────────────────────────────────────────
 function parseSynchro(text) {
   const results = [];
   const rawBlocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\f');
@@ -314,24 +314,13 @@ function parseSynchro(text) {
     if (!block.trim()) continue;
     const blockLines = block.split('\n');
 
-    let headerLine = '';
-    for (const l of blockLines) {
-      if (/^\d+:/.test(l.trim())) { headerLine = l.trim(); break; }
-    }
-    if (!headerLine) continue;
+    // Try to detect format and parse header
+    let headerInfo = parseBlockHeader(blockLines);
+    if (!headerInfo) continue;
 
-    const headerMatch = headerLine.match(/^(\d+):\s*(.+?)\t(.+)$/);
-    if (!headerMatch) continue;
+    const { node, intName, period, control } = headerInfo;
 
-    const node    = parseInt(headerMatch[1], 10);
-    const intName = headerMatch[2].trim();
-    const period  = headerMatch[3].trim();
-
-    const blockText = block;
-    const isSignalized = /^Timings\t/m.test(blockText) || /Intersection Signal Delay/i.test(blockText);
-    const control = isSignalized ? 'S' : 'U';
-
-    if (isSignalized) {
+    if (control === 'S') {
       parseSignalized(block, node, intName, period, control, results);
     } else {
       parseTWSC(block, node, intName, period, control, results);
@@ -339,6 +328,64 @@ function parseSynchro(text) {
   }
 
   return results;
+}
+
+// ─── Parse block header (handles both formats) ────────────────────────────────
+function parseBlockHeader(blockLines) {
+  // Format 1: "1: Broad Hollow Rd & South Service Rd	Existing 2025"
+  // Format 2: "1: Broad Hollow Rd & South Service Rd	Existing 2025 AM Peak"
+  
+  let headerLine = '';
+  for (const l of blockLines) {
+    if (/^\d+:/.test(l.trim())) {
+      headerLine = l.trim();
+      break;
+    }
+  }
+  
+  if (!headerLine) return null;
+
+  // Parse node and intersection name
+  const headerMatch = headerLine.match(/^(\d+):\s*(.+?)\t(.+)$/);
+  if (!headerMatch) return null;
+
+  const node = parseInt(headerMatch[1], 10);
+  const intName = headerMatch[2].trim();
+  const restOfHeader = headerMatch[3].trim();
+  
+  // Extract period from header or subsequent lines
+  let period = '';
+  if (/AM\s*Peak/i.test(restOfHeader)) {
+    period = 'AM Peak';
+  } else if (/PM\s*Peak/i.test(restOfHeader)) {
+    period = 'PM Peak';
+  } else if (/SAT/i.test(restOfHeader)) {
+    period = 'SAT Peak';
+  } else {
+    // Look for period in next few lines
+    for (let i = 0; i < Math.min(5, blockLines.length); i++) {
+      const line = blockLines[i];
+      if (/AM\s*Peak/i.test(line)) {
+        period = 'AM Peak';
+        break;
+      } else if (/PM\s*Peak/i.test(line)) {
+        period = 'PM Peak';
+        break;
+      } else if (/SAT/i.test(line)) {
+        period = 'SAT Peak';
+        break;
+      }
+    }
+  }
+
+  // Determine control type
+  const blockText = blockLines.join('\n');
+  const isSignalized = /^Timings\t/m.test(blockText) || 
+                       /Intersection Signal Delay/i.test(blockText) ||
+                       /Control Type:.*Signal/i.test(blockText);
+  const control = isSignalized ? 'S' : 'U';
+
+  return { node, intName, period, control };
 }
 
 // ─── Helper: Parse Movement and Lane Configurations ──────────────────────────
@@ -362,30 +409,42 @@ function parseMovementAndLaneConfig(blockLines) {
   return { movements, laneConfigs };
 }
 
+// ─── Helper: Parse Lane Group header row ─────────────────────────────────────
+function parseLaneGroupHeader(blockLines) {
+  for (let i = 0; i < blockLines.length; i++) {
+    const line = blockLines[i];
+    const cells = line.split('\t');
+    const label = (cells[0] || '').trim();
+    
+    if (/^Lane Group\s*$/i.test(label)) {
+      return cells.slice(1).map(c => c.trim());
+    }
+  }
+  return null;
+}
+
 // ─── Helper: Derive lane group from lane config string ───────────────────────
-function deriveLaneGroup(config) {
+function deriveLaneGroup(config, moveType) {
   if (!config || config === '0' || config === '-') return '';
   
-  // Extract number and symbols
   const hasLeft = /</.test(config);
   const hasRight = />/.test(config);
   const numStr = config.replace(/[<>]/g, '');
   const num = parseInt(numStr, 10) || 1;
 
   if (hasLeft && hasRight) {
-    // <1> = shared left/through/right
     return 'LTR';
   } else if (hasLeft) {
-    // <1 = shared left/through
     return 'LT';
   } else if (hasRight) {
-    // 1> or 2> = through + right
     if (num === 1) return 'TR';
-    // Multiple through lanes with right: e.g., 2> → TTR
     return 'T'.repeat(num - 1) + 'TR';
   } else {
-    // Just a number: repeat the movement type
-    return num.toString(); // We'll handle this per movement type
+    // Just a number
+    if (moveType === 'L' || moveType === 'R') {
+      return moveType.repeat(num);
+    }
+    return num.toString();
   }
 }
 
@@ -397,6 +456,8 @@ function parseTWSC(block, node, intName, period, control, results) {
   let minorHeaderCells = null;
   let laneDelays = {};
   let laneLOS = {};
+  let approachDelays = {};
+  let approachLOS = {};
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -404,15 +465,17 @@ function parseTWSC(block, node, intName, period, control, results) {
     const cells = line.split('\t');
     const rowLabel = (cells[0] || '').trim();
 
-    if (/Minor Lane\/Major Mvmt/i.test(rowLabel)) {
+    // Parse lane group header for tab-delimited format
+    if (/^Minor Lane\/Major Mvmt/i.test(rowLabel) || /^Direction, Lane #/i.test(rowLabel)) {
       minorHeaderCells = cells;
     }
 
-    if (/HCM Ctrl Dly \(s\/v\)/i.test(rowLabel) && minorHeaderCells) {
+    // Parse delays
+    if ((/HCM Ctrl Dly/i.test(rowLabel) || /Control Delay \(s\/veh\)/i.test(rowLabel)) && minorHeaderCells) {
       const len = Math.max(minorHeaderCells.length, cells.length);
       for (let c = 1; c < len; c++) {
-        const h    = (minorHeaderCells[c] || '').trim();
-        const vStr = (cells[c]           || '').trim();
+        const h = (minorHeaderCells[c] || '').trim();
+        const vStr = (cells[c] || '').trim();
         if (!h || !vStr || vStr === '-') continue;
         const v = parseFloat(vStr);
         if (isNaN(v)) continue;
@@ -420,32 +483,76 @@ function parseTWSC(block, node, intName, period, control, results) {
       }
     }
 
-    if (/HCM Lane LOS/i.test(rowLabel) && minorHeaderCells) {
+    // Parse LOS
+    if ((/HCM Lane LOS/i.test(rowLabel) || /^Lane LOS\s*$/i.test(rowLabel)) && minorHeaderCells) {
       const len = Math.max(minorHeaderCells.length, cells.length);
       for (let c = 1; c < len; c++) {
-        const h      = (minorHeaderCells[c] || '').trim();
-        const losStr = (cells[c]           || '').trim();
+        const h = (minorHeaderCells[c] || '').trim();
+        const losStr = (cells[c] || '').trim();
         if (!h || !losStr || losStr === '-') continue;
         laneLOS[h] = losStr;
       }
     }
+
+    // Parse approach delay
+    if (/^Approach Delay \(s\/veh\)/i.test(rowLabel) && minorHeaderCells) {
+      const len = Math.max(minorHeaderCells.length, cells.length);
+      for (let c = 1; c < len; c++) {
+        const h = (minorHeaderCells[c] || '').trim();
+        const vStr = (cells[c] || '').trim();
+        if (!h || !vStr || vStr === '-') continue;
+        const v = parseFloat(vStr);
+        if (isNaN(v)) continue;
+        const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
+        if (approachMatch) {
+          approachDelays[approachMatch[1].toUpperCase()] = v;
+        }
+      }
+    }
+
+    // Parse approach LOS
+    if (/^Approach LOS\s*$/i.test(rowLabel) && minorHeaderCells) {
+      const len = Math.max(minorHeaderCells.length, cells.length);
+      for (let c = 1; c < len; c++) {
+        const h = (minorHeaderCells[c] || '').trim();
+        const losStr = (cells[c] || '').trim();
+        if (!h || !losStr || losStr === '-') continue;
+        const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
+        if (approachMatch) {
+          approachLOS[approachMatch[1].toUpperCase()] = losStr;
+        }
+      }
+    }
   }
 
-  // Build lane group from movements/laneConfigs
+  // Build lane group map
   const laneGroupMap = buildLaneGroupMap(movements, laneConfigs);
 
+  // Emit lane-level rows
   for (const [h, delay] of Object.entries(laneDelays)) {
     if (delay == null || isNaN(delay)) continue;
 
     const approachMatch = h.match(/^(EB|WB|NB|SB)/i);
     const approach = approachMatch ? approachMatch[1].toUpperCase() : h;
 
-    // Use lane group from config if available
-    let laneGroup = laneGroupMap[approach] || 'L'; // fallback
-
+    let laneGroup = laneGroupMap[approach] || 'L';
     const los = laneLOS[h] || computeLOS(delay, 'U');
 
     results.push({ node, control, intName, period, approach, laneGroup, delay, los });
+  }
+
+  // Emit approach rows
+  for (const [approach, delay] of Object.entries(approachDelays)) {
+    results.push({
+      node,
+      control,
+      intName,
+      period,
+      approach,
+      laneGroup: 'Approach',
+      delay,
+      los: approachLOS[approach] || computeLOS(delay, 'U')
+    });
   }
 }
 
@@ -455,11 +562,11 @@ function parseSignalized(block, node, intName, period, control, results) {
   const { movements, laneConfigs } = parseMovementAndLaneConfig(lines);
 
   let laneDelays = {};
-  let laneLOS    = {};
+  let laneLOS = {};
   let approachDelays = {};
-  let approachLOS    = {};
-  let overallDelay   = null;
-  let overallLOS     = null;
+  let approachLOS = {};
+  let overallDelay = null;
+  let overallLOS = null;
   let lgCols = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -468,9 +575,10 @@ function parseSignalized(block, node, intName, period, control, results) {
     const cells = line.split('\t');
     const rowLabel = (cells[0] || '').trim();
 
+    // Parse Lane Group header
     if (/^Lane Group\s*$/i.test(rowLabel)) {
       lgCols = [];
-      for (let c = 2; c < cells.length; c++) {
+      for (let c = 1; c < cells.length; c++) {
         const v = (cells[c] || '').trim();
         if (!v) continue;
         const m = v.match(/^(EB|WB|NB|SB)(L|T|R|LT|TR|LR|LTR)?$/i);
@@ -480,6 +588,7 @@ function parseSignalized(block, node, intName, period, control, results) {
       }
     }
 
+    // Parse delays
     if (/^(Control Delay|Total Delay)\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = parseFloat((cells[lc.col] || '').trim());
@@ -487,6 +596,7 @@ function parseSignalized(block, node, intName, period, control, results) {
       });
     }
 
+    // Parse LOS
     if (/^LOS\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = (cells[lc.col] || '').trim();
@@ -494,6 +604,7 @@ function parseSignalized(block, node, intName, period, control, results) {
       });
     }
 
+    // Parse approach delay
     if (/^Approach Delay\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = parseFloat((cells[lc.col] || '').trim());
@@ -501,6 +612,7 @@ function parseSignalized(block, node, intName, period, control, results) {
       });
     }
 
+    // Parse approach LOS
     if (/^Approach LOS\s*$/i.test(rowLabel)) {
       lgCols.forEach(lc => {
         const v = (cells[lc.col] || '').trim();
@@ -508,40 +620,58 @@ function parseSignalized(block, node, intName, period, control, results) {
       });
     }
 
+    // Parse overall intersection delay/LOS
     const sigMatch = line.match(/Intersection Signal Delay\s*\(s\/veh\)[:\s]+([\d.]+)/i);
     if (sigMatch) overallDelay = parseFloat(sigMatch[1]);
     const losMatch = line.match(/Intersection LOS[:\s]+([A-F])/i);
     if (losMatch) overallLOS = losMatch[1];
   }
 
-  // Build lane group map from movements/laneConfigs
+  // Build lane group map
   const laneGroupMap = buildLaneGroupMap(movements, laneConfigs);
 
-  // Emit lane-group rows using config-based lane groups
+  // Emit lane-group rows
   for (const [key, delay] of Object.entries(laneDelays)) {
     const m = key.match(/^(EB|WB|NB|SB)(.*)/);
     if (!m) continue;
     const approach = m[1];
-
     const laneGroup = laneGroupMap[approach] || 'T';
     const los = laneLOS[key] || computeLOS(delay, 'S');
     results.push({ node, control, intName, period, approach, laneGroup, delay, los });
   }
 
-  // Approach rows
+  // Emit approach rows
   for (const [approach, delay] of Object.entries(approachDelays)) {
-    results.push({ node, control, intName, period, approach, laneGroup: 'Approach', delay, los: approachLOS[approach] || computeLOS(delay, 'S') });
+    results.push({
+      node,
+      control,
+      intName,
+      period,
+      approach,
+      laneGroup: 'Approach',
+      delay,
+      los: approachLOS[approach] || computeLOS(delay, 'S')
+    });
   }
 
-  // Overall
+  // Emit overall row
   if (overallDelay != null) {
-    results.push({ node, control, intName, period, approach: 'Overall', laneGroup: '', delay: overallDelay, los: overallLOS || computeLOS(overallDelay, 'S') });
+    results.push({
+      node,
+      control,
+      intName,
+      period,
+      approach: 'Overall',
+      laneGroup: '',
+      delay: overallDelay,
+      los: overallLOS || computeLOS(overallDelay, 'S')
+    });
   }
 }
 
 // ─── Build lane group map from movements/laneConfigs ─────────────────────────
 function buildLaneGroupMap(movements, laneConfigs) {
-  const map = {}; // { EB: 'LTR', WB: 'TTR', ... }
+  const map = {};
 
   if (!movements || !laneConfigs) return map;
 
@@ -558,15 +688,13 @@ function buildLaneGroupMap(movements, laneConfigs) {
 
     if (!config || config === '0' || config === '-') continue;
 
-    const laneGroup = deriveLaneGroup(config);
+    const laneGroup = deriveLaneGroup(config, moveType);
 
-    // For turn lanes (L or R), just use the movement type repeated by count
     if (moveType === 'L' || moveType === 'R') {
       const num = parseInt(config.replace(/[<>]/g, ''), 10) || 1;
       if (!map[approach]) map[approach] = '';
       map[approach] += moveType.repeat(num);
     } else if (moveType === 'T') {
-      // Through lanes: use derived lane group
       if (!map[approach]) map[approach] = '';
       map[approach] += laneGroup;
     }
