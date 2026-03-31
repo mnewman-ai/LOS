@@ -1,102 +1,215 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Synchro LOS Parser</title>
-<script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
-<style>
-/* [Keep all your existing CSS - no changes needed] */
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f4f8; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
-.card { background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 40px; width: 100%; max-width: 760px; }
-h1 { font-size: 1.6rem; color: #1a3050; margin-bottom: 6px; }
-.subtitle { color: #6b7280; font-size: 0.95rem; margin-bottom: 32px; }
-.drop-zone { border: 2px dashed #93c5fd; border-radius: 10px; padding: 48px 24px; text-align: center; cursor: pointer; transition: all 0.2s; background: #f8faff; }
-.drop-zone:hover, .drop-zone.dragover { border-color: #3b82f6; background: #eff6ff; }
-.drop-zone svg { margin-bottom: 12px; color: #93c5fd; }
-.drop-zone p { color: #374151; font-size: 1rem; }
-.drop-zone span { color: #6b7280; font-size: 0.85rem; }
-#fileInput { display: none; }
-.file-name { margin-top: 14px; font-size: 0.9rem; color: #3b82f6; font-weight: 500; max-height: 100px; overflow-y: auto; }
-.btn { display: inline-block; margin-top: 24px; padding: 12px 32px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; transition: background 0.2s; width: 100%; font-weight: 600; }
-.btn:hover { background: #1d4ed8; }
-.btn:disabled { background: #93c5fd; cursor: not-allowed; }
-.status { margin-top: 20px; padding: 14px 18px; border-radius: 8px; font-size: 0.9rem; display: none; }
-.status.success { background: #d1fae5; color: #065f46; display: block; }
-.status.error { background: #fee2e2; color: #991b1b; display: block; }
-.status.info { background: #dbeafe; color: #1e3a8a; display: block; }
-.preview-section { margin-top: 32px; display: none; }
-.preview-section h2 { font-size: 1rem; color: #374151; margin-bottom: 12px; font-weight: 600; }
-.table-wrap { overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-thead tr { background: #1e3a8a; color: white; }
-thead th { padding: 8px 12px; text-align: left; white-space: nowrap; }
-tbody tr:nth-child(even) { background: #f8fafc; }
-tbody tr:hover { background: #eff6ff; }
-tbody td { padding: 7px 12px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
-.los-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.8rem; }
-.los-A { background: #d1fae5; color: #065f46; }
-.los-B { background: #d1fae5; color: #065f46; }
-.los-C { background: #fef9c3; color: #713f12; }
-.los-D { background: #fed7aa; color: #9a3412; }
-.los-E { background: #fecaca; color: #991b1b; }
-.los-F { background: #fca5a5; color: #7f1d1d; }
-.how-to { margin-top: 36px; padding: 20px 24px; background: #f8faff; border-left: 4px solid #3b82f6; border-radius: 0 8px 8px 0; }
-.how-to h3 { font-size: 0.95rem; color: #1e3a8a; margin-bottom: 10px; }
-.how-to ol { padding-left: 18px; }
-.how-to li { font-size: 0.85rem; color: #374151; margin-bottom: 5px; }
-.footer { margin-top: 24px; font-size: 0.8rem; color: #9ca3af; text-align: center; }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Synchro LOS Parser</title>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0f4f8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      padding: 40px;
+      width: 100%;
+      max-width: 760px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      color: #1a3050;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: #6b7280;
+      font-size: 0.95rem;
+      margin-bottom: 32px;
+    }
+
+    .drop-zone {
+      border: 2px dashed #93c5fd;
+      border-radius: 10px;
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: #f8faff;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #3b82f6;
+      background: #eff6ff;
+    }
+    .drop-zone svg {
+      margin-bottom: 12px;
+      color: #93c5fd;
+    }
+    .drop-zone p { color: #374151; font-size: 1rem; }
+    .drop-zone span { color: #6b7280; font-size: 0.85rem; }
+
+    #fileInput { display: none; }
+
+    .file-name {
+      margin-top: 14px;
+      font-size: 0.9rem;
+      color: #3b82f6;
+      font-weight: 500;
+      max-height: 100px;
+      overflow-y: auto;
+    }
+
+    .btn {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 12px 32px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+      width: 100%;
+      font-weight: 600;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .btn:disabled { background: #93c5fd; cursor: not-allowed; }
+
+    .status {
+      margin-top: 20px;
+      padding: 14px 18px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      display: none;
+    }
+    .status.success { background: #d1fae5; color: #065f46; display: block; }
+    .status.error   { background: #fee2e2; color: #991b1b; display: block; }
+    .status.info    { background: #dbeafe; color: #1e3a8a; display: block; }
+
+    .preview-section {
+      margin-top: 32px;
+      display: none;
+    }
+    .preview-section h2 {
+      font-size: 1rem;
+      color: #374151;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    thead tr { background: #1e3a8a; color: white; }
+    thead th { padding: 8px 12px; text-align: left; white-space: nowrap; }
+    tbody tr:nth-child(even) { background: #f8fafc; }
+    tbody tr:hover { background: #eff6ff; }
+    tbody td { padding: 7px 12px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+    .los-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 0.8rem;
+    }
+    .los-A { background: #d1fae5; color: #065f46; }
+    .los-B { background: #d1fae5; color: #065f46; }
+    .los-C { background: #fef9c3; color: #713f12; }
+    .los-D { background: #fed7aa; color: #9a3412; }
+    .los-E { background: #fecaca; color: #991b1b; }
+    .los-F { background: #fca5a5; color: #7f1d1d; }
+
+    .how-to {
+      margin-top: 36px;
+      padding: 20px 24px;
+      background: #f8faff;
+      border-left: 4px solid #3b82f6;
+      border-radius: 0 8px 8px 0;
+    }
+    .how-to h3 { font-size: 0.95rem; color: #1e3a8a; margin-bottom: 10px; }
+    .how-to ol { padding-left: 18px; }
+    .how-to li { font-size: 0.85rem; color: #374151; margin-bottom: 5px; }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      text-align: center;
+    }
+  </style>
 </head>
 <body>
+
 <div class="card">
-<h1>Synchro LOS Parser</h1>
-<p class="subtitle">Drop in multiple Synchro reports and get a formatted Excel LOS summary by peak hour.</p>
-<div class="drop-zone" id="dropZone">
-<svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-<path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-8m0 0-3 3m3-3 3 3M4.5 19.5h15A2.25 2.25 0 0 0 21.75 17V9.75A2.25 2.25 0 0 0 19.5 7.5h-3.75L14.25 5.25H9.75L8.25 7.5H4.5A2.25 2.25 0 0 0 2.25 9.75V17A2.25 2.25 0 0 0 4.5 19.5Z"/>
-</svg>
-<p>Click or drag &amp; drop your Synchro reports here</p>
-<span>Upload all scenarios for each time period (e.g., 22700.00 EX AM.txt, NB AM.txt, BD AM.txt)</span>
-<div class="file-name" id="fileName"></div>
+  <h1>Synchro LOS Parser</h1>
+  <p class="subtitle">Drop in multiple Synchro reports and get a formatted Excel LOS summary by peak hour.</p>
+
+  <div class="drop-zone" id="dropZone">
+    <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+        d="M12 16v-8m0 0-3 3m3-3 3 3M4.5 19.5h15A2.25 2.25 0 0 0 21.75 17V9.75A2.25 2.25 0 0 0 19.5 7.5h-3.75L14.25 5.25H9.75L8.25 7.5H4.5A2.25 2.25 0 0 0 2.25 9.75V17A2.25 2.25 0 0 0 4.5 19.5Z"/>
+    </svg>
+    <p>Click or drag &amp; drop your Synchro reports here</p>
+    <span>Upload all scenarios for each time period (e.g., 22700.00 EX AM.txt, NB AM.txt, BD AM.txt)</span>
+    <div class="file-name" id="fileName"></div>
+  </div>
+  <input type="file" id="fileInput" accept=".txt" multiple />
+
+  <button class="btn" id="parseBtn" disabled>Generate Excel File</button>
+
+  <div class="status" id="status"></div>
+
+  <div class="preview-section" id="previewSection">
+    <h2>Preview (first tab, first 20 rows)</h2>
+    <div class="table-wrap">
+      <table id="previewTable"></table>
+    </div>
+  </div>
+
+  <div class="how-to">
+    <h3>How to use</h3>
+    <ol>
+      <li>Export Synchro reports as <strong>.txt</strong> for all scenarios and time periods.</li>
+      <li>Name files like <strong>22700.00 EX AM.txt</strong>, <strong>22700.00 NB PM.txt</strong>, <strong>22700.00 BD SAT.txt</strong>, etc.</li>
+      <li>Drop all files at once (or select multiple files).</li>
+      <li>Click <strong>Generate Excel File</strong>.</li>
+      <li>Excel will have tabs for <strong>AM</strong>, <strong>PM</strong>, and <strong>SAT</strong> with full formatting.</li>
+    </ol>
+  </div>
 </div>
-<input type="file" id="fileInput" accept=".txt" multiple />
-<button class="btn" id="parseBtn" disabled>Generate Excel File</button>
-<div class="status" id="status"></div>
-<div class="preview-section" id="previewSection">
-<h2>Preview (first tab, first 20 rows)</h2>
-<div class="table-wrap">
-<table id="previewTable"></table>
-</div>
-</div>
-<div class="how-to">
-<h3>How to use</h3>
-<ol>
-<li>Export Synchro reports as <strong>.txt</strong> for all scenarios and time periods.</li>
-<li>Name files like <strong>22700.00 EX AM.txt</strong>, <strong>22700.00 NB PM.txt</strong>, <strong>22700.00 BD SAT.txt</strong>, etc.</li>
-<li>Drop all files at once (or select multiple files).</li>
-<li>Click <strong>Generate Excel File</strong>.</li>
-<li>Excel will have tabs for <strong>AM</strong>, <strong>PM</strong>, and <strong>SAT</strong> with full formatting.</li>
-</ol>
-</div>
-</div>
+
 <div class="footer">Supports TWSC (unsignalized) and Signalized intersections · Synchro 6–12</div>
 
 <script>
-// ─── Drag & drop wiring ─────────────────────────────────────────────────────────
+// ─── Drag & drop wiring ───────────────────────────────────────────────────────
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
-const fileName = document.getElementById('fileName');
-const parseBtn = document.getElementById('parseBtn');
-const statusEl = document.getElementById('status');
+const fileName  = document.getElementById('fileName');
+const parseBtn  = document.getElementById('parseBtn');
+const statusEl  = document.getElementById('status');
+
 let loadedFiles = [];
 
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => {
-  e.preventDefault();
-  dropZone.classList.add('dragover');
-});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
@@ -111,6 +224,7 @@ fileInput.addEventListener('change', () => {
 function loadFiles(files) {
   loadedFiles = [];
   let loaded = 0;
+
   files.forEach(f => {
     const reader = new FileReader();
     reader.onload = ev => {
@@ -130,6 +244,7 @@ parseBtn.addEventListener('click', async () => {
   if (!loadedFiles.length) return;
   try {
     const dataByPeriod = {};
+
     for (const file of loadedFiles) {
       const rows = parseSynchro(file.content);
       if (!rows.length) continue;
@@ -137,13 +252,17 @@ parseBtn.addEventListener('click', async () => {
       if (!dataByPeriod[period]) dataByPeriod[period] = {};
       dataByPeriod[period][scenario] = rows;
     }
+
     if (Object.keys(dataByPeriod).length === 0) {
       showStatus('No intersections found in any file.', 'error');
       return;
     }
+
     await buildCombinedExcel(dataByPeriod);
+
     const firstPeriod = Object.keys(dataByPeriod).sort()[0];
     renderPreviewCombined(dataByPeriod[firstPeriod], firstPeriod);
+
     const tabCount = Object.keys(dataByPeriod).length;
     const fileCount = loadedFiles.length;
     showStatus(`✓ Done! Created ${tabCount} tab(s) from ${fileCount} file(s). Excel file downloaded.`, 'success');
@@ -158,11 +277,13 @@ function showStatus(msg, type) {
   statusEl.className = 'status ' + type;
 }
 
-// ─── Filename parsing ───────────────────────────────────────────────────────────
+// ─── Filename parsing ─────────────────────────────────────────────────────────
 function parseFilename(filename) {
   let base = filename.replace(/\.txt$/i, '').trim();
+
   let scenario = 'EX';
   let period = 'AM';
+
   if (/BD\s*MIT/i.test(base)) {
     scenario = 'BD MIT';
   } else if (/\bBD\b/i.test(base)) {
@@ -172,6 +293,7 @@ function parseFilename(filename) {
   } else if (/\bEX\b/i.test(base)) {
     scenario = 'EX';
   }
+
   if (/\bSAT\b/i.test(base) || /SATURDAY/i.test(base)) {
     period = 'SAT';
   } else if (/\bPM\b/i.test(base)) {
@@ -179,676 +301,42 @@ function parseFilename(filename) {
   } else if (/\bAM\b/i.test(base)) {
     period = 'AM';
   }
+
   return { scenario, period };
 }
 
-// ─── Main Parser ────────────────────────────────────────────────────────────────
+// ─── Parser (same as before) ──────────────────────────────────────────────────
 function parseSynchro(text) {
   const results = [];
   const rawBlocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\f');
-  
+
   for (const block of rawBlocks) {
     if (!block.trim()) continue;
     const blockLines = block.split('\n');
-    
+
     let headerLine = '';
     for (const l of blockLines) {
-      if (/^\d+:/.test(l.trim())) {
-        headerLine = l.trim();
-        break;
-      }
+      if (/^\d+:/.test(l.trim())) { headerLine = l.trim(); break; }
     }
     if (!headerLine) continue;
-    
+
     const headerMatch = headerLine.match(/^(\d+):\s*(.+?)\t(.+)$/);
     if (!headerMatch) continue;
-    
-    const node = parseInt(headerMatch[1], 10);
+
+    const node    = parseInt(headerMatch[1], 10);
     const intName = headerMatch[2].trim();
-    const period = headerMatch[3].trim();
-    
+    const period  = headerMatch[3].trim();
+
     const blockText = block;
     const isSignalized = /^Timings\t/m.test(blockText) || /Intersection Signal Delay/i.test(blockText);
     const control = isSignalized ? 'S' : 'U';
-    
+
     if (isSignalized) {
       parseSignalized(block, node, intName, period, control, results);
     } else {
       parseTWSC(block, node, intName, period, control, results);
     }
   }
-  
+
   return results;
 }
-
-// ─── Signalized parser (FIXED) ──────────────────────────────────────────────────
-function parseSignalized(block, node, intName, period, control, results) {
-  const lines = block.split('\n');
-  
-  let laneGroupRow = null;
-  let delayRow = null;
-  let losRow = null;
-  let approachDelayRow = null;
-  let approachLOSRow = null;
-  let overallDelay = null;
-  let overallLOS = null;
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const cells = line.split('\t');
-    const rowLabel = (cells[0] || '').trim();
-    
-    if (/^Lane Group\s*$/i.test(rowLabel)) {
-      laneGroupRow = cells;
-    }
-    if (/^(Control Delay|Total Delay)\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
-      delayRow = cells;
-    }
-    if (/^LOS\s*$/i.test(rowLabel)) {
-      losRow = cells;
-    }
-    if (/^Approach Delay\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
-      approachDelayRow = cells;
-    }
-    if (/^Approach LOS\s*$/i.test(rowLabel)) {
-      approachLOSRow = cells;
-    }
-    
-    const sigMatch = line.match(/Intersection Signal Delay\s*\(s\/veh\)[:\s]+([\d.]+)/i);
-    if (sigMatch) overallDelay = parseFloat(sigMatch[1]);
-    const losMatch = line.match(/Intersection LOS[:\s]+([A-F])/i);
-    if (losMatch) overallLOS = losMatch[1];
-  }
-  
-  // Parse lane groups
-  if (laneGroupRow && delayRow && losRow) {
-    for (let c = 1; c < laneGroupRow.length; c++) {
-      const lg = (laneGroupRow[c] || '').trim();
-      if (!lg) continue;
-      
-      const m = lg.match(/^(EB|WB|NB|SB)(L|T|R|LT|TR|LR|LTR|U)?$/i);
-      if (!m) continue;
-      
-      const approach = m[1].toUpperCase();
-      const laneGroup = m[2] ? m[2].toUpperCase() : 'T';
-      
-      const delayStr = (delayRow[c] || '').trim();
-      const losStr = (losRow[c] || '').trim();
-      
-      if (!delayStr || delayStr === '-') continue;
-      const delay = parseFloat(delayStr);
-      if (isNaN(delay)) continue;
-      
-      const los = losStr && losStr !== '-' ? losStr : computeLOS(delay, 'S');
-      
-      results.push({
-        node,
-        control,
-        intName,
-        period,
-        approach,
-        laneGroup,
-        delay,
-        los
-      });
-    }
-  }
-  
-  // Parse approach delays
-  if (laneGroupRow && approachDelayRow && approachLOSRow) {
-    const approachesProcessed = new Set();
-    for (let c = 1; c < laneGroupRow.length; c++) {
-      const lg = (laneGroupRow[c] || '').trim();
-      if (!lg) continue;
-      
-      const m = lg.match(/^(EB|WB|NB|SB)/i);
-      if (!m) continue;
-      const approach = m[1].toUpperCase();
-      
-      if (approachesProcessed.has(approach)) continue;
-      
-      const delayStr = (approachDelayRow[c] || '').trim();
-      const losStr = (approachLOSRow[c] || '').trim();
-      
-      if (!delayStr || delayStr === '-') continue;
-      const delay = parseFloat(delayStr);
-      if (isNaN(delay)) continue;
-      
-      approachesProcessed.add(approach);
-      
-      const los = losStr && losStr !== '-' ? losStr : computeLOS(delay, 'S');
-      
-      results.push({
-        node,
-        control,
-        intName,
-        period,
-        approach,
-        laneGroup: 'Approach',
-        delay,
-        los
-      });
-    }
-  }
-  
-  // Overall
-  if (overallDelay != null) {
-    results.push({
-      node,
-      control,
-      intName,
-      period,
-      approach: 'Overall',
-      laneGroup: '',
-      delay: overallDelay,
-      los: overallLOS || computeLOS(overallDelay, 'S')
-    });
-  }
-}
-
-// ─── TWSC parser (FIXED) ────────────────────────────────────────────────────────
-function parseTWSC(block, node, intName, period, control, results) {
-  const lines = block.split('\n');
-  
-  let directionRow = null;
-  let delayRow = null;
-  let losRow = null;
-  let approachDelayRow = null;
-  let approachLOSRow = null;
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const cells = line.split('\t');
-    const rowLabel = (cells[0] || '').trim();
-    
-    if (/^Direction,\s*Lane\s*#\s*$/i.test(rowLabel)) {
-      directionRow = cells;
-    }
-    if (/^Control Delay\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
-      delayRow = cells;
-    }
-    if (/^Lane LOS\s*$/i.test(rowLabel)) {
-      losRow = cells;
-    }
-    if (/^Approach Delay\s*\(s\/veh\)\s*$/i.test(rowLabel)) {
-      approachDelayRow = cells;
-    }
-    if (/^Approach LOS\s*$/i.test(rowLabel)) {
-      approachLOSRow = cells;
-    }
-  }
-  
-  // Parse lane-level data
-  if (directionRow && delayRow && losRow) {
-    for (let c = 1; c < directionRow.length; c++) {
-      const dir = (directionRow[c] || '').trim();
-      if (!dir) continue;
-      
-      const m = dir.match(/^(EB|WB|NB|SB)\s+(\d+)$/i);
-      if (!m) continue;
-      
-      const approach = m[1].toUpperCase();
-      const laneNum = m[2];
-      
-      const delayStr = (delayRow[c] || '').trim();
-      const losStr = (losRow[c] || '').trim();
-      
-      if (!delayStr || delayStr === '-' || delayStr === '0.0') continue;
-      const delay = parseFloat(delayStr);
-      if (isNaN(delay) || delay === 0) continue;
-      
-      const los = losStr && losStr !== '-' ? losStr : computeLOS(delay, 'U');
-      
-      results.push({
-        node,
-        control,
-        intName,
-        period,
-        approach,
-        laneGroup: `Lane ${laneNum}`,
-        delay,
-        los
-      });
-    }
-  }
-  
-  // Parse approach-level data
-  if (directionRow && approachDelayRow && approachLOSRow) {
-    const approachesProcessed = new Set();
-    for (let c = 1; c < directionRow.length; c++) {
-      const dir = (directionRow[c] || '').trim();
-      if (!dir) continue;
-      
-      const m = dir.match(/^(EB|WB|NB|SB)/i);
-      if (!m) continue;
-      const approach = m[1].toUpperCase();
-      
-      if (approachesProcessed.has(approach)) continue;
-      
-      const delayStr = (approachDelayRow[c] || '').trim();
-      const losStr = (approachLOSRow[c] || '').trim();
-      
-      if (!delayStr || delayStr === '-' || delayStr === '0.0') continue;
-      const delay = parseFloat(delayStr);
-      if (isNaN(delay) || delay === 0) continue;
-      
-      approachesProcessed.add(approach);
-      
-      const los = losStr && losStr !== '-' ? losStr : computeLOS(delay, 'U');
-      
-      results.push({
-        node,
-        control,
-        intName,
-        period,
-        approach,
-        laneGroup: 'Approach',
-        delay,
-        los
-      });
-    }
-  }
-}
-
-function computeLOS(delay, control) {
-  if (delay == null || isNaN(delay)) return '';
-  if (delay <= 0) return 'X';
-  if (control === 'S') {
-    if (delay < 10) return 'A';
-    if (delay < 20) return 'B';
-    if (delay < 35) return 'C';
-    if (delay < 55) return 'D';
-    if (delay < 80) return 'E';
-    return 'F';
-  } else {
-    if (delay < 10) return 'A';
-    if (delay < 15) return 'B';
-    if (delay < 25) return 'C';
-    if (delay < 35) return 'D';
-    if (delay < 50) return 'E';
-    return 'F';
-  }
-}
-
-// ─── Sorting ────────────────────────────────────────────────────────────────────
-function sortApproach(a, b) {
-  const order = ['EB', 'WB', 'NB', 'SB', 'Overall'];
-  const idxA = order.indexOf(a);
-  const idxB = order.indexOf(b);
-  if (idxA === -1 && idxB === -1) return a.localeCompare(b);
-  if (idxA === -1) return 1;
-  if (idxB === -1) return -1;
-  return idxA - idxB;
-}
-
-function sortLaneGroup(a, b, control) {
-  // For signalized
-  if (control === 'S') {
-    const order = ['L', 'LT', 'T', 'TR', 'R', 'LTR', 'U', 'Approach'];
-    const idxA = order.indexOf(a);
-    const idxB = order.indexOf(b);
-    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-    if (idxA !== -1) return -1;
-    if (idxB !== -1) return 1;
-  }
-  // For unsignalized - sort lanes numerically
-  const laneA = a.match(/Lane (\d+)/);
-  const laneB = b.match(/Lane (\d+)/);
-  if (laneA && laneB) {
-    return parseInt(laneA[1]) - parseInt(laneB[1]);
-  }
-  if (a === 'Approach') return 1;
-  if (b === 'Approach') return -1;
-  return a.localeCompare(b);
-}
-
-function sortRows(rows) {
-  return rows.sort((a, b) => {
-    if (a.node !== b.node) return a.node - b.node;
-    const appCmp = sortApproach(a.approach, b.approach);
-    if (appCmp !== 0) return appCmp;
-    return sortLaneGroup(a.laneGroup, b.laneGroup, a.control);
-  });
-}
-
-function roundDelay(delay) {
-  if (delay == null || isNaN(delay)) return null;
-  return Math.round(delay * 10) / 10;
-}
-
-// ─── Excel builder ──────────────────────────────────────────────────────────────
-async function buildCombinedExcel(dataByPeriod) {
-  const workbook = new ExcelJS.Workbook();
-  const periods = ['AM', 'PM', 'SAT'].filter(p => dataByPeriod[p]);
-  
-  for (const period of periods) {
-    const scenarioData = dataByPeriod[period];
-    const worksheet = workbook.addWorksheet(period);
-    buildFormattedSheet(worksheet, scenarioData, period);
-  }
-  
-  const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'LOS_Summary.xlsx';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function buildFormattedSheet(ws, scenarioData, periodLabel) {
-  ws.columns = [
-    { width: 6 }, { width: 8 }, { width: 55 }, { width: 10 }, { width: 12 },
-    { width: 8 }, { width: 6 }, { width: 8 }, { width: 6 },
-    { width: 8 }, { width: 6 }, { width: 8 }, { width: 6 }
-  ];
-  
-  ws.getCell('A1').value = periodLabel;
-  ws.mergeCells('A1:M1');
-  ws.getCell('A1').font = { name: 'Segoe UI', size: 8, bold: true };
-  ws.getCell('A1').alignment = { horizontal: 'left', vertical: 'middle' };
-  
-  const header1 = ws.getRow(2);
-  header1.values = [
-    'Synchro Node #', 'CONTROL', 'Intersection', 'Approach', 'Lane Group',
-    'Existing', '', 'No-Build', '', 'Build', '', 'Build with Mitigation', ''
-  ];
-  
-  const header2 = ws.getRow(3);
-  header2.values = [
-    '', '', '', '', '',
-    'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS', 'Delay', 'LOS'
-  ];
-  
-  ws.mergeCells('A2:A3');
-  ws.mergeCells('B2:B3');
-  ws.mergeCells('C2:C3');
-  ws.mergeCells('D2:D3');
-  ws.mergeCells('E2:E3');
-  ws.mergeCells('F2:G2');
-  ws.mergeCells('H2:I2');
-  ws.mergeCells('J2:K2');
-  ws.mergeCells('L2:M2');
-  
-  const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } };
-  const headerFont = { name: 'Segoe UI', size: 8, bold: true };
-  const headerAlignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-  const thinBorder = {
-    top: { style: 'thin' }, left: { style: 'thin' },
-    bottom: { style: 'thin' }, right: { style: 'thin' }
-  };
-  
-  for (let row = 2; row <= 3; row++) {
-    for (let col = 1; col <= 13; col++) {
-      const cell = ws.getCell(row, col);
-      cell.fill = headerFill;
-      cell.font = headerFont;
-      cell.alignment = headerAlignment;
-      cell.border = thinBorder;
-    }
-  }
-  
-  const allKeys = new Set();
-  const dataMap = {};
-  
-  for (const [scenario, rows] of Object.entries(scenarioData)) {
-    const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
-    sortedRows.forEach(r => {
-      const key = `${r.node}|${r.control}|${r.intName}|${r.approach}|${r.laneGroup}`;
-      allKeys.add(key);
-      if (!dataMap[key]) {
-        dataMap[key] = {
-          node: r.node,
-          control: r.control,
-          intName: r.intName,
-          approach: r.approach,
-          laneGroup: r.laneGroup,
-          scenarios: {}
-        };
-      }
-      dataMap[key].scenarios[scenario] = { delay: r.delay, los: r.los };
-    });
-  }
-  
-  const sortedKeys = Array.from(allKeys).sort((a, b) => {
-    const [nodeA, ctrlA, intA, appA, lgA] = a.split('|');
-    const [nodeB, ctrlB, intB, appB, lgB] = b.split('|');
-    if (parseInt(nodeA) !== parseInt(nodeB)) return parseInt(nodeA) - parseInt(nodeB);
-    const appCmp = sortApproach(appA, appB);
-    if (appCmp !== 0) return appCmp;
-    return sortLaneGroup(lgA, lgB, ctrlA);
-  });
-  
-  let rowNum = 4;
-  const dataRows = [];
-  
-  sortedKeys.forEach(key => {
-    const data = dataMap[key];
-    const exData = data.scenarios['EX'] || {};
-    const nbData = data.scenarios['NB'] || {};
-    const bdData = data.scenarios['BD'] || {};
-    const mitData = data.scenarios['BD MIT'] || {};
-    
-    const row = ws.getRow(rowNum);
-    row.values = [
-      data.node,
-      data.control,
-      formatIntName(data.intName),
-      data.approach,
-      data.laneGroup,
-      exData.delay != null ? exData.delay.toFixed(1) : '',
-      exData.los || '',
-      nbData.delay != null ? nbData.delay.toFixed(1) : '',
-      nbData.los || '',
-      bdData.delay != null ? bdData.delay.toFixed(1) : '',
-      bdData.los || '',
-      mitData.delay != null ? mitData.delay.toFixed(1) : '',
-      mitData.los || ''
-    ];
-    
-    dataRows.push({
-      rowNum,
-      node: data.node,
-      control: data.control,
-      intName: formatIntName(data.intName),
-      approach: data.approach
-    });
-    
-    const dataFont = { name: 'Segoe UI', size: 8 };
-    const centerAlign = { horizontal: 'center', vertical: 'middle' };
-    const leftAlign = { horizontal: 'left', vertical: 'middle', wrapText: true };
-    
-    for (let col = 1; col <= 13; col++) {
-      const cell = row.getCell(col);
-      cell.font = dataFont;
-      cell.border = thinBorder;
-      cell.alignment = col === 3 ? leftAlign : centerAlign;
-    }
-    
-    rowNum++;
-  });
-  
-  applyDataMerges(ws, dataRows);
-}
-
-function applyDataMerges(ws, dataRows) {
-  // Merge Node
-  let nodeStart = null;
-  let lastNode = null;
-  for (let i = 0; i < dataRows.length; i++) {
-    const curr = dataRows[i];
-    if (curr.node !== lastNode) {
-      if (nodeStart !== null && i - 1 > nodeStart) {
-        ws.mergeCells(dataRows[nodeStart].rowNum, 1, dataRows[i - 1].rowNum, 1);
-      }
-      nodeStart = i;
-      lastNode = curr.node;
-    }
-  }
-  if (nodeStart !== null && dataRows.length - 1 > nodeStart) {
-    ws.mergeCells(dataRows[nodeStart].rowNum, 1, dataRows[dataRows.length - 1].rowNum, 1);
-  }
-  
-  // Merge Control
-  let ctrlStart = null;
-  let lastCtrl = null;
-  for (let i = 0; i < dataRows.length; i++) {
-    const curr = dataRows[i];
-    if (curr.control !== lastCtrl) {
-      if (ctrlStart !== null && i - 1 > ctrlStart) {
-        ws.mergeCells(dataRows[ctrlStart].rowNum, 2, dataRows[i - 1].rowNum, 2);
-      }
-      ctrlStart = i;
-      lastCtrl = curr.control;
-    }
-  }
-  if (ctrlStart !== null && dataRows.length - 1 > ctrlStart) {
-    ws.mergeCells(dataRows[ctrlStart].rowNum, 2, dataRows[dataRows.length - 1].rowNum, 2);
-  }
-  
-  // Merge Intersection
-  let intStart = null;
-  let lastInt = null;
-  for (let i = 0; i < dataRows.length; i++) {
-    const curr = dataRows[i];
-    if (curr.intName !== lastInt) {
-      if (intStart !== null && i - 1 > intStart) {
-        ws.mergeCells(dataRows[intStart].rowNum, 3, dataRows[i - 1].rowNum, 3);
-      }
-      intStart = i;
-      lastInt = curr.intName;
-    }
-  }
-  if (intStart !== null && dataRows.length - 1 > intStart) {
-    ws.mergeCells(dataRows[intStart].rowNum, 3, dataRows[dataRows.length - 1].rowNum, 3);
-  }
-  
-  // Merge Approach
-  let appStart = null;
-  let lastApp = null;
-  for (let i = 0; i < dataRows.length; i++) {
-    const curr = dataRows[i];
-    if (curr.approach !== lastApp) {
-      if (appStart !== null && i - 1 > appStart) {
-        ws.mergeCells(dataRows[appStart].rowNum, 4, dataRows[i - 1].rowNum, 4);
-      }
-      appStart = i;
-      lastApp = curr.approach;
-    }
-  }
-  if (appStart !== null && dataRows.length - 1 > appStart) {
-    ws.mergeCells(dataRows[appStart].rowNum, 4, dataRows[dataRows.length - 1].rowNum, 4);
-  }
-}
-
-function formatIntName(name) {
-  const ampIdx = name.lastIndexOf(' & ');
-  if (ampIdx === -1) return name;
-  const left = name.substring(0, ampIdx).trim();
-  const right = name.substring(ampIdx + 3).trim();
-  return `${right} at ${left}`;
-}
-
-// ─── Preview ────────────────────────────────────────────────────────────────────
-function renderPreviewCombined(scenarioData, period) {
-  const section = document.getElementById('previewSection');
-  const table = document.getElementById('previewTable');
-  section.style.display = 'block';
-  section.querySelector('h2').textContent = `Preview (${period} tab, first 20 rows)`;
-  
-  table.innerHTML = '';
-  const thead = document.createElement('thead');
-  thead.innerHTML = `<tr>
-    <th>#</th><th>Ctrl</th><th>Intersection</th><th>Approach</th><th>Lane Group</th>
-    <th colspan="2">Existing</th><th colspan="2">No-Build</th><th colspan="2">Build</th><th colspan="2">Build MIT</th>
-  </tr>
-  <tr>
-    <th></th><th></th><th></th><th></th><th></th>
-    <th>Delay</th><th>LOS</th><th>Delay</th><th>LOS</th><th>Delay</th><th>LOS</th><th>Delay</th><th>LOS</th>
-  </tr>`;
-  table.appendChild(thead);
-  
-  const tbody = document.createElement('tbody');
-  const allKeys = new Set();
-  const dataMap = {};
-  
-  for (const [scenario, rows] of Object.entries(scenarioData)) {
-    const sortedRows = sortRows(rows.map(r => ({...r, delay: roundDelay(r.delay)})));
-    sortedRows.forEach(r => {
-      const key = `${r.node}|${r.control}|${r.intName}|${r.approach}|${r.laneGroup}`;
-      allKeys.add(key);
-      if (!dataMap[key]) {
-        dataMap[key] = {
-          node: r.node,
-          control: r.control,
-          intName: r.intName,
-          approach: r.approach,
-          laneGroup: r.laneGroup,
-          scenarios: {}
-        };
-      }
-      dataMap[key].scenarios[scenario] = { delay: r.delay, los: r.los };
-    });
-  }
-  
-  const sortedKeys = Array.from(allKeys).sort((a, b) => {
-    const [nodeA, ctrlA, intA, appA, lgA] = a.split('|');
-    const [nodeB, ctrlB, intB, appB, lgB] = b.split('|');
-    if (parseInt(nodeA) !== parseInt(nodeB)) return parseInt(nodeA) - parseInt(nodeB);
-    const appCmp = sortApproach(appA, appB);
-    if (appCmp !== 0) return appCmp;
-    return sortLaneGroup(lgA, lgB, ctrlA);
-  });
-  
-  const preview = sortedKeys.slice(0, 20);
-  let lastNode = null;
-  
-  preview.forEach(key => {
-    const data = dataMap[key];
-    const tr = document.createElement('tr');
-    
-    const exData = data.scenarios['EX'] || {};
-    const nbData = data.scenarios['NB'] || {};
-    const bdData = data.scenarios['BD'] || {};
-    const mitData = data.scenarios['BD MIT'] || {};
-    
-    const showNode = data.node !== lastNode ? data.node : '';
-    const showInt = data.node !== lastNode ? formatIntName(data.intName) : '';
-    const showCtrl = data.node !== lastNode ? data.control : '';
-    
-    lastNode = data.node;
-    
-    const makeBadge = los => los ? `<span class="los-badge los-${los}">${los}</span>` : '';
-    const makeDelay = d => d != null ? d.toFixed(1) : '';
-    
-    tr.innerHTML = `
-      <td>${showNode}</td>
-      <td>${showCtrl}</td>
-      <td style="max-width:200px;white-space:normal">${showInt}</td>
-      <td>${data.approach}</td>
-      <td>${data.laneGroup}</td>
-      <td>${makeDelay(exData.delay)}</td>
-      <td>${makeBadge(exData.los)}</td>
-      <td>${makeDelay(nbData.delay)}</td>
-      <td>${makeBadge(nbData.los)}</td>
-      <td>${makeDelay(bdData.delay)}</td>
-      <td>${makeBadge(bdData.los)}</td>
-      <td>${makeDelay(mitData.delay)}</td>
-      <td>${makeBadge(mitData.los)}</td>
-    `;
-    tbody.appendChild(tr);
-  });
-  
-  table.appendChild(tbody);
-  
-  if (sortedKeys.length > 20) {
-    const note = document.createElement('caption');
-    note.style = 'caption-side:bottom;font-size:0.8rem;color:#6b7280;padding:6px';
-    note.textContent = `Showing 20 of ${sortedKeys.length} rows. All rows are included in the Excel file.`;
-    table.appendChild(note);
-  }
-}
-</script>
-</body>
-</html>
